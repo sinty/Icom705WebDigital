@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IC-705 — цифровые моды в браузере</title>
+<style>
+  :root { --bg:#14161a; --panel:#1c1f26; --line:#2b303b; --fg:#e6e9ef;
+          --dim:#98a2b3; --accent:#60a5fa; --ok:#4ade80; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:40px 24px; background:var(--bg); color:var(--fg);
+         font:15px/1.6 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 8px; font-weight:650; letter-spacing:-.01em; }
+  p.lead { color:var(--dim); font-size:16px; margin:0 0 28px; }
+  .card { display:block; background:var(--panel); border:1px solid var(--line);
+          border-radius:12px; padding:18px 20px; margin-bottom:12px;
+          text-decoration:none; color:inherit; transition:border-color .15s, transform .15s; }
+  .card:hover { border-color:var(--accent); transform:translateY(-1px); }
+  .card b { display:block; font-size:16px; margin-bottom:3px; }
+  .card span { color:var(--dim); font-size:14px; }
+  .note { background:#2a2410; border:1px solid #4a3d12; border-radius:10px;
+          padding:14px 18px; margin:24px 0; font-size:14px; }
+  .note b { color:#fbbf24; }
+  #compat { border-radius:10px; padding:12px 18px; margin:24px 0; font-size:14px;
+            border:1px solid var(--line); }
+  ul { padding-left:22px; color:var(--dim); font-size:14px; }
+  code { font-family:ui-monospace, Consolas, monospace; background:#0e1015;
+         padding:1px 6px; border-radius:4px; font-size:.92em; }
+  footer { margin-top:34px; padding-top:18px; border-top:1px solid var(--line);
+           color:var(--dim); font-size:13px; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>IC-705 — цифровые моды в браузере</h1>
+  <p class="lead">DMR с ПЧ-выхода Icom IC-705. Демодуляция на JavaScript, декодер
+  dsd-fme собран в WebAssembly, управление радио по CI-V через Web Serial.
+  Устанавливать на компьютер не нужно ничего.</p>
+
+  <div id="compat">проверяю поддержку браузера…</div>
+
+  <a class="card" href="web/index.html">
+    <b>Открыть декодер →</b>
+    <span>Захват ПЧ, декодирование DMR, панорама и управление радио.
+    Есть самопроверка на эталонной записи — работает и без радио.</span>
+  </a>
+
+  <a class="card" href="tools/scope-preview.html">
+    <b>Панорама: предпросмотр →</b>
+    <span>Отрисовка панорамы на синтетическом сигнале. Радио не требуется.</span>
+  </a>
+
+  <div class="note">
+    <b>Настройки радио.</b> <code>Connectors → USB AF/IF Output → AF/IF = IF</code>,
+    уровень <code>IF Output Level</code> 50–70&nbsp;%. Для управления по CI-V:
+    <code>CI-V Address = A4h</code>, <code>CI-V USB Baud Rate = Auto</code>.
+    Зарядку по USB лучше выключить.
+  </div>
+
+  <h2 style="font-size:17px;margin:28px 0 8px">Что нужно</h2>
+  <ul>
+    <li>Chrome или Edge на настольной системе. Web Serial и сырой стереовход
+        Web Audio есть только там — Safari, Firefox и мобильные не подойдут.</li>
+    <li>IC-705, подключённый по USB. Второй канал звука необязателен: ПЧ-выход
+        отдаёт один сигнал, продублированный со сдвигом в отсчёт, и моно
+        декодируется почти так же.</li>
+  </ul>
+
+  <footer>
+    Исходники, история находок и методика проверок —
+    <a href="https://github.com/sinty/Icom705WebDigital">на GitHub</a>.
+    Декодер — <a href="https://github.com/lwvmobile/dsd-fme">dsd-fme</a>,
+    вокодер — <a href="https://github.com/lwvmobile/mbelib">mbelib</a>.
+  </footer>
+
+</div>
+
+<script>
+  // Сразу говорим, поддержан ли браузер: иначе пользователь узнает об этом
+  // из непонятной ошибки уже внутри приложения.
+  const el = document.getElementById('compat');
+  const miss = [];
+  if (!('serial' in navigator)) miss.push('Web Serial (управление радио по CI-V)');
+  if (!(window.AudioWorkletNode)) miss.push('AudioWorklet (захват и воспроизведение)');
+  if (!navigator.mediaDevices?.getUserMedia) miss.push('getUserMedia (доступ к звуку)');
+  if (!window.WebAssembly) miss.push('WebAssembly (декодер)');
+  if (!miss.length) {
+    el.style.color = 'var(--ok)';
+    el.textContent = 'Браузер подходит: всё нужное поддерживается.';
+  } else {
+    el.style.color = 'var(--bad)';
+    el.innerHTML = 'В этом браузере не хватает: ' + miss.join(', ') +
+      '. Нужен Chrome или Edge на настольной системе.';
+  }
+</script>
+</body>
+</html>

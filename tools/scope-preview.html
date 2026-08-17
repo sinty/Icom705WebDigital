@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Панорама IC-705 — предпросмотр без радио</title>
+<style>
+  :root { --bg:#14161a; --panel:#1c1f26; --line:#2b303b; --fg:#e6e9ef; --dim:#98a2b3; --accent:#60a5fa; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.sub { color:var(--dim); margin:0 0 18px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:18px; margin-bottom:16px; }
+  .scopebar { display:flex; justify-content:space-between; align-items:center;
+              background:#1b2436; border:1px solid var(--line); border-bottom:0;
+              border-radius:7px 7px 0 0; padding:5px 10px;
+              font:11px ui-monospace, Consolas, monospace; letter-spacing:.08em; color:#cde1f5; }
+  canvas { width:100%; height:320px; display:block; background:#05070d;
+           border:1px solid var(--line); border-top:0; border-radius:0 0 7px 7px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  label { color:var(--dim); }
+  .dim { color:var(--dim); }
+  code { font-family:ui-monospace, Consolas, monospace; background:#0e1015; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Панорама IC-705 — предпросмотр без радио</h1>
+  <p class="sub">Настоящий код отрисовки из <code>web/civ/spectrum.js</code> на синтетическом сигнале.
+  Нужен, чтобы подгонять внешний вид под родной экран, не занимая радио.</p>
+
+  <div class="panel">
+    <div class="scopebar"><span>SPECTRUM SCOPE</span><span id="info" class="dim">—</span></div>
+    <canvas id="scope"></canvas>
+    <div class="row">
+      <label>пол</label><input type="range" id="floor" min="0" max="150" value="20" style="width:150px">
+      <span id="floorVal" class="dim">20</span>
+      <label>потолок</label><input type="range" id="ceil" min="10" max="160" value="140" style="width:150px">
+      <span id="ceilVal" class="dim">140</span>
+      <label>доля спектра</label><input type="range" id="ratio" min="25" max="65" value="45" style="width:120px">
+      <span id="ratioVal" class="dim">45 %</span>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="run" checked> идёт развёртка</label>
+      <span class="dim">центр 433.175 МГц, обзор 200 кГц — как на фотографии экрана</span>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { ScopeView, POINTS, AMP_MAX } from '../web/civ/spectrum.js';
+
+const $ = id => document.getElementById(id);
+let scope = new ScopeView($('scope'), { history: 260, specRatio: 0.45 });
+window.addEventListener('resize', () => scope.resize());
+
+const CENTER = 433_175_000;
+const SPAN = 200_000;
+
+/* Синтетика, похожая на реальный эфир: шумовая полка со спеклом, постоянные
+   несущие, одна сильная в центре и пара мигающих. */
+const carriers = [
+  { off: 0,       width: 3,  amp: 105, on: () => true },
+  { off: -62_000, width: 2,  amp: 55,  on: () => true },
+  { off: -30_000, width: 2,  amp: 42,  on: t => (t % 90) < 55 },
+  { off: 44_000,  width: 2,  amp: 48,  on: t => (t % 140) < 60 },
+  { off: 78_000,  width: 4,  amp: 62,  on: t => (t % 200) < 120 },
+];
+
+let tick = 0;
+function synth () {
+  const row = new Uint8Array(POINTS);
+  for (let i = 0; i < POINTS; i++) {
+    // полка около 42 с небольшим наклоном и спеклом
+    row[i] = 38 + Math.round(Math.random() * 10) + Math.round(4 * Math.sin(i / 60));
+  }
+  for (const c of carriers) {
+    if (!c.on(tick)) continue;
+    const idx = Math.round((c.off / SPAN + 0.5) * (POINTS - 1));
+    for (let k = -c.width * 3; k <= c.width * 3; k++) {
+      const i = idx + k;
+      if (i < 0 || i >= POINTS) continue;
+      const g = Math.exp(-(k * k) / (2 * c.width * c.width));
+      row[i] = Math.min(AMP_MAX, row[i] + Math.round(c.amp * g * (0.85 + Math.random() * 0.3)));
+    }
+  }
+  tick++;
+  return { data: row, centerHz: CENTER, spanHz: SPAN, seq: tick };
+}
+
+const fmtHz = hz => (hz / 1e6).toFixed(6).replace(/(\d)(?=(\d{3})+\.)/g, '$1 ') + ' МГц';
+
+// радио присылает примерно четыре развёртки в секунду
+setInterval(() => {
+  if (!$('run').checked) return;
+  const row = synth();
+  scope.push(row);
+  $('info').textContent =
+    `CENTER ${fmtHz(row.centerHz)} · обзор ${row.spanHz / 1000} кГц · сетка ${row.spanHz / 1000 / 10}k/10dB`;
+}, 250);
+
+const apply = () => {
+  $('floorVal').textContent = $('floor').value;
+  $('ceilVal').textContent = $('ceil').value;
+  scope.setRange(+$('floor').value, +$('ceil').value);
+};
+$('floor').oninput = apply;
+$('ceil').oninput = apply;
+
+$('ratio').oninput = () => {
+  $('ratioVal').textContent = $('ratio').value + ' %';
+  scope = new ScopeView($('scope'), { history: 260, specRatio: +$('ratio').value / 100 });
+  apply();
+};
+apply();
+</script>
+</body>
+</html>
