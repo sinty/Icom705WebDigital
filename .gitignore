@@ -1,0 +1,29 @@
+# Сборка WASM и клоны чужих исходников — воспроизводятся командой из NOTES.md
+native/build/
+native/third_party/
+
+# Локальные настройки Claude Code: содержат адрес Pi в домашней сети
+.claude/settings.local.json
+
+# Результаты прогонов тестов отбрасываем, исходные эталоны и golden-файлы
+# оставляем: без радио их не пересоздать, и на них держатся все сверки.
+# ВНИМАНИЕ: комментарий в конце строки с шаблоном не поддерживается —
+# вся строка считается шаблоном целиком.
+ref/*.wav
+ref/*.log
+
+# DMR, основной эталон сырой ПЧ
+!ref/if_master.wav
+# D-STAR и YSF — на будущее
+!ref/if_dstar.wav
+!ref/if_ysf.wav
+# if_master после демодулятора GNU Radio на Pi
+!ref/demod_stereo.wav
+# выход нативной сборки dsd-fme на aarch64
+!ref/voice_pi.wav
+# выход WASM-сборки файловым путём — база для сверок
+!ref/voice_w1.wav
+
+__pycache__/
+*.pyc
+node_modules/

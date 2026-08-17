@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>IC-705 — декодер цифровых мод в браузере</title>
+<style>
+  :root {
+    --bg:#14161a; --panel:#1c1f26; --line:#2b303b; --fg:#e6e9ef; --dim:#98a2b3;
+    --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  h1 { font-size:19px; margin:0 0 4px; font-weight:600; }
+  .sub { color:var(--dim); margin:0 0 20px; }
+  h2 { font-size:12px; margin:0 0 12px; font-weight:600; color:var(--accent);
+       text-transform:uppercase; letter-spacing:.06em; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:18px; margin-bottom:16px; }
+  button { background:var(--accent); color:#0b1220; border:0; border-radius:7px;
+           padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; }
+  button.sec { background:#333a48; color:var(--fg); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  select, input[type=number] { background:#12151b; color:var(--fg);
+           border:1px solid var(--line); border-radius:7px; padding:8px 10px; font:inherit; }
+  select { min-width:320px; }
+  label { color:var(--dim); }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .row:last-child { margin-bottom:0; }
+  .stats { display:flex; gap:26px; flex-wrap:wrap; font-size:13px; }
+  .stats b { color:var(--dim); font-weight:500; display:block; font-size:11px;
+             text-transform:uppercase; letter-spacing:.05em; }
+  .stats span { font-family:ui-monospace, Consolas, monospace; font-size:15px; }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .dim { color:var(--dim); }
+  #log { height:340px; overflow-y:auto; background:#0e1015; border:1px solid var(--line);
+         border-radius:7px; padding:10px 12px; font:12px/1.45 ui-monospace, Consolas, monospace;
+         white-space:pre-wrap; }
+  #log .warn { color:var(--warn); } #log .dim { color:var(--dim); }
+  #log .bad { color:var(--bad); font-weight:600; }
+  #status { color:var(--dim); font-size:13px; }
+  .note { background:#2a2410; border-color:#4a3d12; }
+  code { font-family:ui-monospace, Consolas, monospace; background:#0e1015;
+         padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>IC-705 — декодер цифровых мод в браузере</h1>
+<p class="sub">DMR с ПЧ-выхода по USB. Ничего не устанавливается: демодуляция на JS, декодер — dsd-fme в WebAssembly.</p>
+
+<div class="panel note">
+  На радио: <code>Connectors → USB AF/IF Output → AF/IF = IF</code>, уровень
+  <code>IF Output Level</code> 50–70&nbsp;%. Нужен Chrome или Edge — Web Audio
+  с сырым стереовходом есть только там.
+</div>
+
+<div class="panel">
+  <h2>Подключение</h2>
+  <div class="row">
+    <button id="grant">Разрешить доступ к звуку</button>
+    <select id="dev" disabled><option>— сначала разрешите доступ —</option></select>
+  </div>
+  <div class="row">
+    <label>Центр ПЧ, Гц</label>
+    <input type="number" id="center" value="12060" step="10" style="width:110px">
+    <label><input type="checkbox" id="squelchOn" checked> сквелч</label>
+    <input type="range" id="squelch" min="-40" max="0" value="-16" style="width:150px">
+    <span id="squelchVal" class="dim">-16 дБ</span>
+  </div>
+  <div class="row">
+    <button id="start" disabled>Запустить</button>
+    <button id="selftest" class="sec">Самопроверка без радио</button>
+    <button id="stop" class="sec" disabled>Остановить</button>
+    <label>Слот</label>
+    <label><input type="radio" name="slot" value="both" checked> оба</label>
+    <label><input type="radio" name="slot" value="ts1"> TS1</label>
+    <label><input type="radio" name="slot" value="ts2"> TS2</label>
+    <label>Громкость</label>
+    <input type="range" id="vol" min="0" max="100" value="80" style="width:130px">
+  </div>
+  <div class="row"><span id="status">Начните с разрешения доступа к звуку.</span></div>
+</div>
+
+<div class="panel">
+  <h2>Состояние</h2>
+  <div class="stats">
+    <div><b>Каналов</b><span id="channels" class="dim">—</span></div>
+    <div><b>В буфере</b><span id="buffered" class="dim">—</span></div>
+    <div><b>Простой декодера</b><span id="starve" class="dim">—</span></div>
+    <div><b>Потеряно отсчётов</b><span id="dropped" class="dim">0</span></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Лог декодера</h2>
+  <div id="log"></div>
+</div>
+
+</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

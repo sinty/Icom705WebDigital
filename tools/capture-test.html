@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>IC-705 IF I/Q — проверка захвата в браузере</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2b303b;
+    --fg: #e6e9ef; --dim: #98a2b3;
+    --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --accent: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 600; }
+  h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; color: var(--accent);
+       text-transform: uppercase; letter-spacing: .06em; }
+  .sub { color: var(--dim); margin: 0 0 20px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .note { background: #2a2410; border-color: #4a3d12; }
+  button {
+    background: var(--accent); color: #0b1220; border: 0; border-radius: 7px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.sec { background: #333a48; color: var(--fg); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  select, input[type=number] {
+    background: #12151b; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px; font: inherit;
+  }
+  select { min-width: 340px; }
+  label { color: var(--dim); margin-right: 6px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px;
+       text-transform: uppercase; letter-spacing: .05em; }
+  td.v { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 20px;
+         font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+  .t-ok   { background: rgba(74,222,128,.15); color: var(--ok); }
+  .t-warn { background: rgba(251,191,36,.15); color: var(--warn); }
+  .t-bad  { background: rgba(248,113,113,.15); color: var(--bad); }
+  .t-info { background: rgba(96,165,250,.15); color: var(--accent); }
+  canvas { width: 100%; height: 190px; display: block;
+           background: #0e1015; border: 1px solid var(--line); border-radius: 7px; }
+  .cap { color: var(--dim); font-size: 12px; margin: 6px 0 16px; }
+  .verdict { font-size: 16px; font-weight: 700; padding: 12px 16px;
+             border-radius: 8px; margin-bottom: 14px; }
+  code { font-family: ui-monospace, Consolas, monospace; background: #0e1015;
+         padding: 1px 5px; border-radius: 4px; }
+  .hint { color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>IC-705 IF I/Q — проверка захвата в браузере</h1>
+<p class="sub">Э0: отдаёт ли Chrome сырую квадратурную пару с USB-кодека без AGC, шумодава и передискретизации.</p>
+
+<div class="panel note">
+  <strong>Перед запуском на радио:</strong> <code>Connectors → USB AF/IF Output → AF/IF = IF</code>,
+  уровень <code>IF Output Level</code> 50–70&nbsp;%. Зарядку по USB выключить.
+  Настроиться на активный DMR-репитер и запускать замер во время передачи —
+  по шуму половина тестов бессмысленна.
+</div>
+
+<div class="panel">
+  <h2>1. Сначала проверьте сам анализатор</h2>
+  <p class="hint">Загрузите <code>ref/if_master.wav</code> с Pi — это заведомо рабочая запись DMR.
+  Если анализатор на ней не покажет «годно», врёт анализатор, а не Chrome.</p>
+  <div class="row">
+    <input type="file" id="file" accept=".wav,audio/wav">
+    <span class="hint" id="fileInfo"></span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>2. Живой захват</h2>
+  <div class="row">
+    <button id="grant">Разрешить доступ к звуку</button>
+    <select id="dev" disabled><option>— сначала разрешите доступ —</option></select>
+  </div>
+  <div class="row">
+    <label>Центр ПЧ, Гц</label><input type="number" id="fc" value="12060" step="10" style="width:110px">
+    <label>Длительность, с</label><input type="number" id="dur" value="20" min="3" max="120" style="width:80px">
+    <button id="start" disabled>Записать и проанализировать</button>
+    <button id="dl" class="sec" disabled>Скачать WAV</button>
+  </div>
+  <p class="hint">Скачанный WAV — стерео s16 48&nbsp;кГц, тот же формат, что у эталонов.
+  Его можно скормить <code>if_demod_offline_iq.py</code> и <code>dsd-fme</code> на Pi:
+  если оттуда пойдёт голос, захват в Chrome доказан окончательно.</p>
+  <div id="status" class="hint"></div>
+</div>
+
+<div id="out" style="display:none">
+  <div class="panel">
+    <h2>Вердикт</h2>
+    <div id="verdict" class="verdict"></div>
+    <table id="tests"><thead><tr><th style="width:170px">Проверка</th><th style="width:90px">Итог</th><th style="width:150px">Значение</th><th>Что это значит</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="panel">
+    <h2>Комплексный спектр</h2>
+    <canvas id="spec" width="1600" height="380"></canvas>
+    <p class="cap">Спектр сигнала <code>I + jQ</code>. У настоящей квадратурной пары энергия сидит
+    только с одной стороны от нуля. Симметричная картинка = фаза между каналами потеряна
+    и зеркальный канал никуда не денется.</p>
+
+    <h2>Гистограмма мгновенной частоты</h2>
+    <canvas id="hist" width="1600" height="380"></canvas>
+    <p class="cap">После переноса на ноль и ФНЧ ±5&nbsp;кГц. У DMR должны быть видны четыре
+    сгустка около ±648 и ±1944&nbsp;Гц — это символы 4FSK. Их наличие означает,
+    что сигнал пригоден к декодированию.</p>
+
+    <h2>Уровень во времени</h2>
+    <canvas id="rms" width="1600" height="300"></canvas>
+    <p class="cap">RMS по 50-мс окнам. Ровная полка на несущей — норма. Заметное «подтягивание»
+    уровня в паузах или плавное выравнивание громкости — работа AGC, которую надо выключать.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const FS_EXPECT = 48000;
+
+/* ─────────── БПФ (radix-2, на месте) ─────────── */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    const half = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const ar = re[i + k], ai = im[i + k];
+        const br = re[i + k + half], bi = im[i + k + half];
+        const vr = br * cr - bi * ci, vi = br * ci + bi * cr;
+        re[i + k] = ar + vr; im[i + k] = ai + vi;
+        re[i + k + half] = ar - vr; im[i + k + half] = ai - vi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+
+/* Усреднённый по блокам комплексный спектр мощности. Возвращает массив длины N,
+   разложенный по возрастанию частоты: индекс 0 == -fs/2, индекс N/2 == 0. */
+function avgSpectrum(I, Q, N) {
+  const nb = Math.max(1, Math.min(60, Math.floor(I.length / N)));
+  const acc = new Float64Array(N);
+  const win = new Float64Array(N);
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N);
+  const re = new Float64Array(N), im = new Float64Array(N);
+  for (let b = 0; b < nb; b++) {
+    const off = b * N;
+    for (let i = 0; i < N; i++) { re[i] = I[off + i] * win[i]; im[i] = Q[off + i] * win[i]; }
+    fft(re, im);
+    for (let k = 0; k < N; k++) acc[k] += re[k] * re[k] + im[k] * im[k];
+  }
+  // перекладываем: отрицательные частоты (верхняя половина) — влево
+  const out = new Float64Array(N);
+  const h = N >> 1;
+  for (let k = 0; k < h; k++) { out[k] = acc[k + h] / nb; out[k + h] = acc[k] / nb; }
+  return out;
+}
+
+/* ─────────── КИХ ФНЧ (окно Хэмминга) ─────────── */
+function lowpass(taps, fc, fs) {
+  const h = new Float64Array(taps), m = (taps - 1) / 2;
+  let sum = 0;
+  for (let i = 0; i < taps; i++) {
+    const x = i - m;
+    const s = x === 0 ? 2 * fc / fs : Math.sin(2 * Math.PI * fc * x / fs) / (Math.PI * x);
+    const w = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (taps - 1));
+    h[i] = s * w; sum += h[i];
+  }
+  for (let i = 0; i < taps; i++) h[i] /= sum;
+  return h;
+}
+
+/* ─────────── Основной анализ ─────────── */
+function analyze(I, Q, fs, fc) {
+  const n = I.length;
+  const r = {};
+
+  // пик и RMS
+  let peak = 0, s2 = 0;
+  for (let i = 0; i < n; i++) {
+    const a = Math.abs(I[i]), b = Math.abs(Q[i]);
+    if (a > peak) peak = a; if (b > peak) peak = b;
+    s2 += I[i] * I[i] + Q[i] * Q[i];
+  }
+  r.peak = peak;
+  r.rmsDb = 10 * Math.log10(s2 / (2 * n) + 1e-30);
+
+  // идентичность каналов (моно, продублированное в оба канала)
+  let identical = true;
+  for (let i = 0; i < n; i += 7) { if (I[i] !== Q[i]) { identical = false; break; } }
+  r.identical = identical;
+
+  // корреляция Пирсона между I и Q
+  let mi = 0, mq = 0;
+  for (let i = 0; i < n; i++) { mi += I[i]; mq += Q[i]; }
+  mi /= n; mq /= n;
+  let cov = 0, vi = 0, vq = 0;
+  for (let i = 0; i < n; i++) {
+    const a = I[i] - mi, b = Q[i] - mq;
+    cov += a * b; vi += a * a; vq += b * b;
+  }
+  r.corr = cov / (Math.sqrt(vi * vq) + 1e-30);
+
+  // спектр и подавление зеркального канала
+  const N = 16384;
+  const spec = avgSpectrum(I, Q, N);
+  r.spec = spec; r.specN = N;
+  const binHz = fs / N, zero = N >> 1;
+  const half = Math.round(5000 / binHz);
+  const cBin = Math.round(fc / binHz);
+  let sig = 0, img = 0;
+  for (let k = -half; k <= half; k++) {
+    const a = zero + cBin + k, b = zero - cBin + k;
+    if (a >= 0 && a < N) sig += spec[a];
+    if (b >= 0 && b < N) img += spec[b];
+  }
+  r.imageRejDb = 10 * Math.log10((sig + 1e-30) / (img + 1e-30));
+
+  // спектральный центроид в окне ±6 кГц вокруг заданного центра — фактический центр несущей
+  let num = 0, den = 0;
+  const w6 = Math.round(6000 / binHz);
+  for (let k = -w6; k <= w6; k++) {
+    const idx = zero + cBin + k;
+    if (idx < 0 || idx >= N) continue;
+    const p = spec[idx];
+    num += p * (cBin + k) * binHz; den += p;
+  }
+  r.centroid = den > 0 ? num / den : NaN;
+
+  // перенос на ноль + ФНЧ ±5 кГц -> мгновенная частота
+  const h = lowpass(63, 5000, fs), T = h.length, M = (T - 1) / 2;
+  const bI = new Float64Array(n), bQ = new Float64Array(n);
+  const dph = -2 * Math.PI * fc / fs;
+  for (let i = 0; i < n; i++) {
+    const c = Math.cos(dph * i), s = Math.sin(dph * i);
+    bI[i] = I[i] * c - Q[i] * s;
+    bQ[i] = I[i] * s + Q[i] * c;
+  }
+  const fI = new Float64Array(n), fQ = new Float64Array(n);
+  for (let i = M; i < n - M; i++) {
+    let ar = 0, ai = 0;
+    for (let t = 0; t < T; t++) { const j = i - M + t; ar += bI[j] * h[t]; ai += bQ[j] * h[t]; }
+    fI[i] = ar; fQ[i] = ai;
+  }
+
+  // порог по магнитуде: берём только заметно сильные отсчёты (несущая, не шум)
+  const mags = [];
+  for (let i = M; i < n - M; i += 13) mags.push(Math.hypot(fI[i], fQ[i]));
+  mags.sort((a, b) => a - b);
+  const gate = mags[Math.floor(mags.length * 0.75)] * 0.6;
+
+  const BINS = 160, SPAN = 3000;
+  const LEVELS = [-1944, -648, 648, 1944];   // символы 4FSK DMR
+  const hist = new Float64Array(BINS);
+  let used = 0, gated = 0, err2 = 0, hits = 0;
+  for (let i = M + 1; i < n - M; i++) {
+    if (Math.hypot(fI[i], fQ[i]) < gate) continue;
+    const dr = fI[i] * fI[i - 1] + fQ[i] * fQ[i - 1];
+    const di = fQ[i] * fI[i - 1] - fI[i] * fQ[i - 1];
+    const f = Math.atan2(di, dr) * fs / (2 * Math.PI);
+    // расстояние до ближайшего уровня — метрика устойчивее подсчёта горбов
+    let d = Infinity;
+    for (const lv of LEVELS) { const a = Math.abs(f - lv); if (a < d) d = a; }
+    gated++; err2 += d * d; if (d < 200) hits++;
+    const b = Math.floor((f + SPAN) / (2 * SPAN) * BINS);
+    if (b >= 0 && b < BINS) { hist[b]++; used++; }
+  }
+  r.hist = hist; r.histSpan = SPAN; r.histUsed = used;
+  r.symRms = gated ? Math.sqrt(err2 / gated) : NaN;
+  r.symHit = gated ? hits / gated * 100 : NaN;
+
+  // RMS во времени, окна по 50 мс
+  const W = Math.round(fs * 0.05), nw = Math.floor(n / W);
+  const rms = new Float64Array(nw);
+  for (let w = 0; w < nw; w++) {
+    let a = 0;
+    for (let i = w * W; i < (w + 1) * W; i++) a += I[i] * I[i] + Q[i] * Q[i];
+    rms[w] = 10 * Math.log10(a / (2 * W) + 1e-30);
+  }
+  r.rms = rms;
+
+  return r;
+}
+
+/* ─────────── Отрисовка ─────────── */
+function drawSpectrum(r, fs, fc) {
+  const cv = $('spec'), g = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  const N = r.specN, spec = r.spec;
+  let mx = 0;
+  for (let k = 0; k < N; k++) if (spec[k] > mx) mx = spec[k];
+  const top = 10 * Math.log10(mx + 1e-30), floor = top - 90;
+
+  g.strokeStyle = '#2b303b'; g.fillStyle = '#98a2b3';
+  g.font = '11px ui-monospace, monospace'; g.lineWidth = 1;
+  for (let f = -24000; f <= 24000; f += 6000) {
+    const x = (f + fs / 2) / fs * W;
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H - 16); g.stroke();
+    g.fillText((f / 1000) + 'k', x + 3, H - 4);
+  }
+  // отметки заданного центра и его зеркала
+  for (const [f, col, lab] of [[fc, '#4ade80', 'центр'], [-fc, '#f87171', 'зеркало']]) {
+    const x = (f + fs / 2) / fs * W;
+    g.strokeStyle = col; g.setLineDash([4, 4]);
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H - 16); g.stroke();
+    g.setLineDash([]); g.fillStyle = col; g.fillText(lab, x + 4, 13);
+  }
+
+  g.strokeStyle = '#60a5fa'; g.lineWidth = 1.2; g.beginPath();
+  for (let k = 0; k < N; k++) {
+    const db = 10 * Math.log10(spec[k] + 1e-30);
+    const x = k / N * W;
+    const y = H - 16 - Math.max(0, Math.min(1, (db - floor) / (top - floor))) * (H - 26);
+    k ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+  g.stroke();
+}
+
+function drawHist(r) {
+  const cv = $('hist'), g = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  const hist = r.hist, B = hist.length, SPAN = r.histSpan;
+  let mx = 0;
+  for (let i = 0; i < B; i++) if (hist[i] > mx) mx = hist[i];
+  if (mx === 0) {
+    g.fillStyle = '#98a2b3'; g.font = '14px sans-serif';
+    g.fillText('нет отсчётов выше порога — записывайте во время передачи', 20, H / 2);
+    return;
+  }
+  g.strokeStyle = '#2b303b'; g.fillStyle = '#98a2b3'; g.font = '11px ui-monospace, monospace';
+  for (let f = -3000; f <= 3000; f += 1000) {
+    const x = (f + SPAN) / (2 * SPAN) * W;
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H - 16); g.stroke();
+    g.fillText(f, x + 3, H - 4);
+  }
+  // ожидаемые символы DMR
+  for (const f of [-1944, -648, 648, 1944]) {
+    const x = (f + SPAN) / (2 * SPAN) * W;
+    g.strokeStyle = 'rgba(74,222,128,.45)'; g.setLineDash([3, 4]);
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H - 16); g.stroke(); g.setLineDash([]);
+  }
+  g.fillStyle = '#60a5fa';
+  for (let i = 0; i < B; i++) {
+    const x = i / B * W, w = W / B;
+    const h = hist[i] / mx * (H - 26);
+    g.fillRect(x, H - 16 - h, Math.max(1, w - 1), h);
+  }
+}
+
+function drawRms(r) {
+  const cv = $('rms'), g = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  const a = r.rms, n = a.length;
+  if (!n) return;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; }
+  lo = Math.max(lo, hi - 70);
+  g.strokeStyle = '#2b303b'; g.fillStyle = '#98a2b3'; g.font = '11px ui-monospace, monospace';
+  for (let d = 0; d <= 4; d++) {
+    const y = 8 + d / 4 * (H - 24);
+    g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+    g.fillText((hi - d / 4 * (hi - lo)).toFixed(0) + ' дБ', 4, y - 3);
+  }
+  g.strokeStyle = '#4ade80'; g.lineWidth = 1.5; g.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = i / (n - 1 || 1) * W;
+    const y = 8 + (1 - (a[i] - lo) / (hi - lo + 1e-9)) * (H - 24);
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+  g.stroke();
+}
+
+/* ─────────── Таблица итогов ─────────── */
+function report(r, meta, fc) {
+  const rows = [];
+  const add = (name, st, val, txt) => rows.push({ name, st, val, txt });
+
+  if (meta.live) {
+    const ch = meta.chSeen;
+    const claim = meta.settings.channelCount;
+    add('Каналов в потоке', ch === 2 ? 'ok' : 'warn',
+      ch + (claim && claim !== ch ? ` (трек заявил ${claim})` : ''),
+      ch === 2 ? 'Пришло два канала — есть межканальный сдвиг, дающий примерно 16 % к качеству.'
+        : 'Пришёл один канал. Декодированию это не мешает (проверено сквозным прогоном), но два ' +
+          'дают меньше ошибок звука. Чинится в Windows: <code>mmsys.cpl</code> → Запись → ' +
+          'свойства устройства → Дополнительно → Формат по умолчанию → «2 канала, 16 бит, 48000 Гц».');
+
+    const cap = meta.caps && meta.caps.channelCount;
+    if (cap) add('Устройство умеет', cap.max >= 2 ? 'ok' : 'warn',
+      `${cap.min ?? '?'}…${cap.max ?? '?'} кан.`,
+      cap.max >= 2 ? 'Устройство заявляет два канала — стерео достижимо.'
+        : 'Устройство отдаёт максимум один канал: формат в Windows выставлен в моно.');
+
+    add('Строгий запрос 2 кан.', meta.exactOk ? 'ok' : 'warn',
+      meta.exactOk ? 'принят' : 'отклонён',
+      meta.exactOk ? 'Chrome согласился открыть устройство строго двухканальным.'
+        : 'Chrome отверг <code>channelCount:{exact:2}</code> — двух каналов у него нет в принципе.');
+
+    const proc = ['echoCancellation', 'noiseSuppression', 'autoGainControl']
+      .filter(k => meta.settings[k] === true);
+    add('Обработка входа', proc.length === 0 ? 'ok' : 'bad',
+      proc.length === 0 ? 'выключена' : proc.join(', '),
+      proc.length === 0 ? 'Эхоподавление, шумодав и AGC отключены — сигнал не тронут.'
+        : 'Chrome не принял ограничения и обрабатывает вход. Сигнал испорчен.');
+
+    const sr = meta.settings.sampleRate, cr = meta.ctxRate;
+    const srOk = (!sr || sr === FS_EXPECT) && cr === FS_EXPECT;
+    add('Частота дискретизации', srOk ? 'ok' : 'warn',
+      (sr ? sr : '?') + ' / ' + cr,
+      srOk ? 'Устройство и AudioContext на 48 кГц — передискретизации нет.'
+           : 'Частоты расходятся: поток пересчитывается, это размывает символы.');
+  } else {
+    add('Источник', 'info', 'файл', 'Анализ загруженного WAV. Живые тесты пропущены.');
+  }
+
+  add('Каналы различны', r.identical ? 'bad' : 'ok', r.identical ? 'идентичны' : 'да',
+    r.identical ? 'L и R побитово совпадают — это моно, продублированное в два канала.'
+                : 'Каналы несут разные данные, как и должно быть у I/Q.');
+
+  const ac = Math.abs(r.corr);
+  add('Корреляция I/Q', ac < 0.3 ? 'ok' : ac < 0.7 ? 'warn' : 'bad', r.corr.toFixed(3),
+    ac < 0.3 ? 'Около нуля — каналы ортогональны, сдвиг 90° на месте.'
+      : ac < 0.7 ? 'Каналы частично связаны. Возможен перекос фазы или подмешивание.'
+        : 'Каналы почти повторяют друг друга — квадратура потеряна.');
+
+  const ir = r.imageRejDb;
+  add('Подавление зеркала', 'info', ir.toFixed(1) + ' дБ',
+    'Справочно — на годность захвата не влияет. IC-705 отдаёт не настоящий I/Q, а один сигнал ' +
+    'в обоих каналах со сдвигом ровно в один отсчёт; на 12 кГц это почти 90°, отсюда ~21 дБ на ' +
+    'стерео и 0 дБ на моно. Зеркало всё равно убирает ФНЧ после переноса на ноль — сквозной прогон ' +
+    'через dsd-fme дал 85 ошибок звука на стерео против 101 на моно, а не разницу в разы.');
+
+  if (isFinite(r.centroid)) {
+    const off = r.centroid - fc;
+    add('Центр несущей', Math.abs(off) < 400 ? 'ok' : 'warn',
+      Math.round(r.centroid) + ' Гц',
+      'Отклонение от заданных ' + fc + ' Гц: ' + (off > 0 ? '+' : '') + Math.round(off) +
+      ' Гц. У каждого передатчика свой уход, это нормально — важно, что несущая найдена.');
+  }
+
+  add('Пик', r.peak < 0.99 ? 'ok' : 'warn', r.peak.toFixed(3),
+    r.peak < 0.99 ? 'Клиппинга нет.'
+      : 'Вход перегружен. Снизьте IF Output Level на радио до 50–60 %.');
+
+  // Подсчёт горбов гистограммы оказался ненадёжен на слабом сигнале (давал восемь там,
+  // где их четыре). Меряем разброс мгновенной частоты вокруг четырёх уровней DMR.
+  // Ориентир снят с эталона if_master.wav: 478 Гц при 19.5 % попаданий.
+  const rms = r.symRms;
+  if (isFinite(rms)) {
+    const st = rms < 560 ? 'ok' : rms < 750 ? 'warn' : 'bad';
+    add('Символы 4FSK', st, Math.round(rms) + ' Гц / ' + r.symHit.toFixed(1) + ' %',
+      (st === 'ok' ? 'Мгновенная частота держится у четырёх уровней DMR не хуже, чем на эталоне. '
+        : st === 'warn' ? 'Разброс выше эталонного — сигнал слабее либо центр смещён. '
+          : 'Привязки к уровням нет: похоже, записан шум, а не передача. ') +
+      'Это отклонение от ближайшего из ±648/±1944 Гц; на эталоне с Pi — 478 Гц при 19.5 % попаданий. ' +
+      'Числа имеют смысл только в сравнении с эталоном, смотрите ещё и форму гистограммы.');
+  } else {
+    add('Символы 4FSK', 'bad', 'нет данных',
+      'Ни одного отсчёта выше порога — замер надо делать во время передачи.');
+  }
+
+  const tb = $('tests').querySelector('tbody');
+  tb.innerHTML = rows.map(x =>
+    `<tr><td>${x.name}</td><td><span class="tag t-${x.st}">${
+      { ok: 'ГОДНО', warn: 'ВНИМАНИЕ', bad: 'ПРОВАЛ', info: 'ИНФО' }[x.st]
+    }</span></td><td class="v">${x.val}</td><td class="hint">${x.txt}</td></tr>`).join('');
+
+  const bad = rows.some(x => x.st === 'bad'), warn = rows.some(x => x.st === 'warn');
+  const v = $('verdict');
+  if (bad) {
+    v.style.background = 'rgba(248,113,113,.12)'; v.style.color = 'var(--bad)';
+    v.textContent = 'Захват непригоден — смотрите строки с пометкой ПРОВАЛ.';
+  } else if (warn) {
+    v.style.background = 'rgba(251,191,36,.12)'; v.style.color = 'var(--warn)';
+    v.textContent = 'Захват в целом рабочий, но есть замечания.';
+  } else {
+    v.style.background = 'rgba(74,222,128,.12)'; v.style.color = 'var(--ok)';
+    v.textContent = 'Захват чистый. Браузер отдаёт I/Q без потерь — проект реализуем.';
+  }
+  $('out').style.display = 'block';
+}
+
+function run(I, Q, fs, meta) {
+  const fc = +$('fc').value || 12060;
+  const r = analyze(I, Q, fs, fc);
+  report(r, meta, fc);
+  drawSpectrum(r, fs, fc);
+  drawHist(r);
+  drawRms(r);
+}
+
+/* ─────────── Разбор WAV вручную (без decodeAudioData, чтобы браузер ничего не трогал) ─────────── */
+function parseWav(buf) {
+  const dv = new DataView(buf);
+  const tag = o => String.fromCharCode(dv.getUint8(o), dv.getUint8(o+1), dv.getUint8(o+2), dv.getUint8(o+3));
+  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('не WAV-файл');
+  let p = 12, fmt = null, data = null;
+  while (p + 8 <= dv.byteLength) {
+    const id = tag(p), sz = dv.getUint32(p + 4, true);
+    if (id === 'fmt ') fmt = { code: dv.getUint16(p+8, true), ch: dv.getUint16(p+10, true),
+                               fs: dv.getUint32(p+12, true), bits: dv.getUint16(p+22, true) };
+    if (id === 'data') { data = { off: p + 8, size: Math.min(sz, dv.byteLength - p - 8) }; break; }
+    p += 8 + sz + (sz & 1);
+  }
+  if (!fmt || !data) throw new Error('нет чанков fmt/data');
+  if (fmt.ch !== 2) throw new Error('нужен стереофайл, в этом каналов: ' + fmt.ch);
+
+  const bytes = fmt.bits >> 3, frames = Math.floor(data.size / (bytes * 2));
+  const I = new Float64Array(frames), Q = new Float64Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const o = data.off + i * bytes * 2;
+    if (fmt.code === 3 && fmt.bits === 32) { I[i] = dv.getFloat32(o, true); Q[i] = dv.getFloat32(o+4, true); }
+    else if (fmt.bits === 16) { I[i] = dv.getInt16(o, true) / 32768; Q[i] = dv.getInt16(o+2, true) / 32768; }
+    else if (fmt.bits === 32) { I[i] = dv.getInt32(o, true) / 2147483648; Q[i] = dv.getInt32(o+4, true) / 2147483648; }
+    else throw new Error('неподдерживаемая разрядность: ' + fmt.bits);
+  }
+  return { I, Q, fs: fmt.fs, bits: fmt.bits, code: fmt.code };
+}
+
+$('file').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const w = parseWav(await f.arrayBuffer());
+    $('fileInfo').textContent =
+      `${w.fs} Гц, ${w.bits} бит, ${(w.I.length / w.fs).toFixed(1)} с`;
+    run(w.I, w.Q, w.fs, { live: false });
+  } catch (err) {
+    $('fileInfo').textContent = 'Ошибка: ' + err.message;
+  }
+};
+
+/* ─────────── Живой захват ─────────── */
+const CONSTRAINTS = (dev, exact) => ({
+  audio: {
+    deviceId: dev ? { exact: dev } : undefined,
+    // exact заставляет Chrome отказать вслух, а не тихо отдать моно
+    channelCount: exact ? { exact: 2 } : 2,
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    // отключаем и устаревшие нестандартные фильтры Chrome
+    googEchoCancellation: false, googAutoGainControl: false,
+    googNoiseSuppression: false, googHighpassFilter: false,
+  },
+  video: false,
+});
+
+$('grant').onclick = async () => {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia(CONSTRAINTS(null));
+    s.getTracks().forEach(t => t.stop());
+    const devs = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === 'audioinput');
+    const sel = $('dev');
+    sel.innerHTML = devs.map(d =>
+      `<option value="${d.deviceId}">${d.label || d.deviceId}</option>`).join('');
+    // USB-кодек IC-705 определяется как Burr-Brown / USB Audio CODEC
+    const guess = devs.findIndex(d => /burr|codec|usb audio/i.test(d.label));
+    if (guess >= 0) sel.selectedIndex = guess;
+    sel.disabled = false; $('start').disabled = false;
+    $('status').textContent = devs.length + ' входов найдено.' +
+      (guess >= 0 ? ' Похоже, USB-кодек выбран автоматически.' : ' Выберите USB Audio CODEC вручную.');
+  } catch (err) {
+    $('status').textContent = 'Доступ не получен: ' + err.message +
+      ' (страницу нужно открывать по http://localhost или https, не как файл)';
+  }
+};
+
+let lastWav = null;
+
+$('start').onclick = async () => {
+  const btn = $('start'); btn.disabled = true; $('dl').disabled = true;
+  const secs = Math.max(3, Math.min(120, +$('dur').value || 20));
+  let stream, ctx;
+  try {
+    let exactOk = true;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS($('dev').value, true));
+    } catch (e) {
+      exactOk = false;
+      stream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS($('dev').value, false));
+    }
+    const track = stream.getAudioTracks()[0];
+    const settings = track.getSettings();
+    const caps = track.getCapabilities ? track.getCapabilities() : null;
+
+    ctx = new AudioContext({ sampleRate: FS_EXPECT, latencyHint: 'playback' });
+    const code = `
+      class Tap extends AudioWorkletProcessor {
+        constructor() { super(); this.bl = []; this.br = []; this.n = 0; }
+        process(inputs) {
+          const inp = inputs[0];
+          if (!inp || !inp.length || !inp[0]) return true;
+          this.bl.push(new Float32Array(inp[0]));
+          // канал НЕ дублируем: если пришёл один, R остаётся нулевым и это видно в отчёте
+          this.br.push(inp[1] ? new Float32Array(inp[1]) : new Float32Array(inp[0].length));
+          this.n += inp[0].length;
+          if (this.n >= 4096) {
+            this.port.postMessage({ l: this.bl, r: this.br, ch: inp.length });
+            this.bl = []; this.br = []; this.n = 0;
+          }
+          return true;
+        }
+      }
+      registerProcessor('tap', Tap);`;
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+
+    const src = ctx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ctx, 'tap', {
+      numberOfInputs: 1, numberOfOutputs: 0,
+      channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'discrete',
+    });
+    src.connect(node);
+
+    const need = FS_EXPECT * secs;
+    const L = [], R = [];
+    let got = 0, chSeen = 0;
+    await new Promise(res => {
+      node.port.onmessage = e => {
+        chSeen = Math.max(chSeen, e.data.ch);
+        for (let i = 0; i < e.data.l.length; i++) {
+          L.push(e.data.l[i]); R.push(e.data.r[i]); got += e.data.l[i].length;
+        }
+        $('status').textContent = `Запись… ${(got / FS_EXPECT).toFixed(1)} / ${secs} с`;
+        if (got >= need) res();
+      };
+    });
+
+    const n = Math.min(got, need);
+    const I = new Float64Array(n), Q = new Float64Array(n);
+    let k = 0;
+    for (let b = 0; b < L.length && k < n; b++)
+      for (let i = 0; i < L[b].length && k < n; i++, k++) { I[k] = L[b][i]; Q[k] = R[b][i]; }
+
+    lastWav = makeWav(I, Q, FS_EXPECT);
+    $('dl').disabled = false;
+    $('status').textContent = `Готово: ${(n / FS_EXPECT).toFixed(1)} с, каналов в графе: ${chSeen}.`;
+    run(I, Q, FS_EXPECT, { live: true, settings, caps, exactOk, chSeen, ctxRate: ctx.sampleRate });
+  } catch (err) {
+    $('status').textContent = 'Ошибка захвата: ' + err.message;
+  } finally {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (ctx) ctx.close();
+    btn.disabled = false;
+  }
+};
+
+function makeWav(I, Q, fs) {
+  const n = I.length, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 2, true);
+  dv.setUint32(24, fs, true); dv.setUint32(28, fs * 4, true);
+  dv.setUint16(32, 4, true); dv.setUint16(34, 16, true);
+  str(36, 'data'); dv.setUint32(40, n * 4, true);
+  const cl = x => Math.max(-32768, Math.min(32767, Math.round(x * 32767)));
+  for (let i = 0; i < n; i++) {
+    dv.setInt16(44 + i * 4, cl(I[i]), true);
+    dv.setInt16(46 + i * 4, cl(Q[i]), true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+$('dl').onclick = () => {
+  if (!lastWav) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(lastWav);
+  a.download = 'chrome_if_capture.wav';
+  a.click();
+};
+</script>
+</body>
+</html>
