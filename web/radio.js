@@ -8,6 +8,7 @@
  */
 import { CivPort, BANDS, sUnits } from './civ/civ.js';
 import { SpectrumAssembler, ScopeView, POINTS } from './civ/spectrum.js';
+import { prefs } from './prefs.js';
 
 const $ = id => document.getElementById(id);
 
@@ -49,12 +50,16 @@ export function initRadio ({ log }) {
   };
 
   /* ---------- панорама ---------- */
-  function setupWaterfall () {
-    const cv = $('waterfall');
-    scope = new ScopeView(cv, { history: 260 });
+  /* Панорама создаётся сразу при загрузке, не по подключению: рамка, сетка и
+     шкала должны быть видны и без радио, иначе непонятно, работает ли вообще. */
+  function createScope () {
+    scope = new ScopeView($('waterfall'), { history: 260 });
     applyContrast();
     window.addEventListener('resize', () => scope?.resize());
+  }
 
+  function wireScope () {
+    const cv = $('waterfall');
     assembler = new SpectrumAssembler(row => {
       scope.push(row);
       if (row.centerHz !== lastCenter || row.spanHz !== lastSpan) {
@@ -81,6 +86,11 @@ export function initRadio ({ log }) {
       say(`Перестройка кликом: ${fmtHz(snapped)}`);
     };
   }
+
+  // порядок важен: панорама должна существовать до того, как приедет первый кадр
+  $('wfFloor').value = prefs.get('wfFloor', 20);
+  $('wfCeil').value = prefs.get('wfCeil', 140);
+  createScope();
 
   /* ---------- опрос состояния ---------- */
   async function pollLoop () {
@@ -118,10 +128,11 @@ export function initRadio ({ log }) {
   }
 
   /* ---------- соединение ---------- */
-  $('civConnect').onclick = async () => {
+  /** @param {SerialPort} [port] уже выданный порт; без него будет показан выбор */
+  async function connect (port) {
     try {
-      say('Выберите CAT-порт радио…');
-      await civ.open(await civ.requestPort({ all: $('civAllPorts').checked }));
+      say(port ? 'Открываю запомненный CAT-порт…' : 'Выберите CAT-порт радио…');
+      await civ.open(port ?? await civ.requestPort({ all: $('civAllPorts').checked }));
       civ.onError = err => log?.('CI-V: порт отвалился — ' + err.message, 'bad');
 
       const hz = await civ.readFrequency();
@@ -129,26 +140,72 @@ export function initRadio ({ log }) {
         say('Порт открыт, но радио не отвечает. Проверьте CI-V Address = A4h и скорость (Auto).');
         log?.('CI-V: ответа на запрос частоты нет. Если открыт wfview или WSJT-X — порт занят им.', 'warn');
         await civ.close();
-        return;
+        return false;
       }
+
+      // запоминаем, какой именно порт подошёл — в следующий раз найдём сами
+      const info = civ.port?.getInfo?.() ?? {};
+      if (info.usbVendorId != null)
+        prefs.set('civPort', { vid: info.usbVendorId, pid: info.usbProductId ?? null });
 
       $('civConnect').disabled = true;
       $('civDisconnect').disabled = false;
       $('civAllPorts').disabled = true;
       document.querySelectorAll('.needs-civ').forEach(el => { el.disabled = false; });
 
-      setupWaterfall();
+      wireScope();
       await refreshUsbOut();
       await civ.setScopeOutput(true);
       polling = true; pollLoop();
       say(`Радио на связи: ${fmtHz(hz)}`);
+      return true;
     } catch (err) {
       // отказ пользователя от выбора порта — не ошибка
       say(err.name === 'NotFoundError'
         ? 'Порт не выбран. Если радио нет в списке — поставьте «показать все порты».'
         : 'CI-V: ' + err.message);
+      return false;
     }
-  };
+  }
+
+  $('civConnect').onclick = () => connect();
+
+  /** Подобрать среди уже выданных портов тот, что запомнен. */
+  async function findRemembered () {
+    const ports = await navigator.serial.getPorts();
+    if (!ports.length) return null;
+    const want = prefs.get('civPort');
+    if (want) {
+      const m = ports.find(p => {
+        const i = p.getInfo?.() ?? {};
+        return i.usbVendorId === want.vid && (want.pid == null || i.usbProductId === want.pid);
+      });
+      if (m) return m;
+    }
+    return ports.length === 1 ? ports[0] : null;
+  }
+
+  /* Порт, выданный однажды, возвращается getPorts() без жеста пользователя —
+     поэтому со второго раза выбирать его уже не нужно. */
+  (async function restorePort () {
+    const port = await findRemembered();
+    if (port) await connect(port);
+    else say('Радио не подключено. Декодер работает и без этого.');
+  })();
+
+  /* Радио включили или воткнули позже — подхватываем, если оно уже разрешено. */
+  navigator.serial.addEventListener('connect', async () => {
+    if (civ.port) return;
+    const port = await findRemembered();
+    if (port) { log?.('Радио появилось на шине — подключаюсь.', 'dim'); await connect(port); }
+  });
+
+  navigator.serial.addEventListener('disconnect', () => {
+    if (!civ.port) return;
+    polling = false;
+    log?.('Радио отключилось от USB.', 'warn');
+    $('civDisconnect').click();
+  });
 
   $('civDisconnect').onclick = async () => {
     polling = false;
@@ -178,14 +235,15 @@ export function initRadio ({ log }) {
 
   /* Контраст: сырые значения кадров идут 0..0xA0, а куда попадает шумовая полка,
      зависит от усиления и REF на радио. Поэтому границы отображения — руками. */
-  function applyContrast () {
+  function applyContrast (save = true) {
     const lo = +$('wfFloor').value, hi = +$('wfCeil').value;
     $('wfFloorVal').textContent = lo;
     $('wfCeilVal').textContent = hi;
     scope?.setRange(lo, hi);
+    if (save) { prefs.set('wfFloor', lo); prefs.set('wfCeil', hi); }
   }
-  $('wfFloor').oninput = applyContrast;
-  $('wfCeil').oninput = applyContrast;
+  $('wfFloor').oninput = () => applyContrast();
+  $('wfCeil').oninput = () => applyContrast();
 
   $('scopeOn').onchange = async e => {
     await civ.setScopeOutput(e.target.checked);

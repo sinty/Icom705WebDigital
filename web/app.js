@@ -4,8 +4,12 @@
  * весь звук — в двух worklet-ах.
  */
 import { initRadio } from './radio.js';
+import { prefs, micGranted } from './prefs.js';
 
 const $ = id => document.getElementById(id);
+
+/** По этому в метке узнаётся USB-кодек IC-705: внутри стоит кодек Burr-Brown (TI). */
+const AUDIO_HINT = /burr|codec|usb audio/i;
 
 const CONSTRAINTS = dev => ({
   audio: {
@@ -45,23 +49,55 @@ function setRunning (on) {
   $('dev').disabled = on;
 }
 
+/* ---------- выбор звукового устройства ---------- */
+
+/** Заполнить список входов и выбрать запомненный (или похожий по метке). */
+async function fillDevices () {
+  const devs = (await navigator.mediaDevices.enumerateDevices())
+    .filter(d => d.kind === 'audioinput' && d.deviceId);
+  if (!devs.length) return null;
+
+  $('dev').innerHTML = devs
+    .map(d => `<option value="${d.deviceId}">${d.label || d.deviceId}</option>`).join('');
+
+  const wantId = prefs.get('audioDeviceId');
+  const wantLabel = prefs.get('audioDeviceLabel');
+  // deviceId стабилен, пока не сброшены данные сайта; если не совпал — ищем по метке
+  let pick = devs.findIndex(d => d.deviceId === wantId);
+  if (pick < 0 && wantLabel) pick = devs.findIndex(d => d.label === wantLabel);
+  if (pick < 0) pick = devs.findIndex(d => AUDIO_HINT.test(d.label));
+  if (pick < 0) pick = 0;
+
+  $('dev').selectedIndex = pick;
+  $('dev').disabled = false;
+  $('start').disabled = false;
+  return devs[pick];
+}
+
+function rememberDevice () {
+  const sel = $('dev').selectedOptions[0];
+  if (!sel) return;
+  prefs.set('audioDeviceId', sel.value);
+  prefs.set('audioDeviceLabel', sel.textContent);
+}
+
+$('dev').onchange = rememberDevice;
+
 $('grant').onclick = async () => {
   try {
     const s = await navigator.mediaDevices.getUserMedia(CONSTRAINTS(null));
     s.getTracks().forEach(t => t.stop());
-    const devs = (await navigator.mediaDevices.enumerateDevices())
-      .filter(d => d.kind === 'audioinput');
-    $('dev').innerHTML = devs
-      .map(d => `<option value="${d.deviceId}">${d.label || d.deviceId}</option>`).join('');
-    const guess = devs.findIndex(d => /burr|codec|usb audio/i.test(d.label));
-    if (guess >= 0) $('dev').selectedIndex = guess;
-    $('dev').disabled = false;
-    $('start').disabled = false;
-    $('status').textContent = 'Устройство выбрано. Радио должно быть в режиме USB AF/IF Output = IF.';
+    const d = await fillDevices();
+    rememberDevice();
+    $('status').textContent = d
+      ? `Устройство: ${d.label}. Радио должно быть в режиме USB AF/IF Output = IF.`
+      : 'Входов не найдено.';
   } catch (err) {
     $('status').textContent = 'Доступ не получен: ' + err.message;
   }
 };
+
+/* ---------- запуск ---------- */
 
 /** Общая часть обоих режимов: контекст, воспроизведение, воркер. */
 async function bringUp () {
@@ -125,12 +161,36 @@ async function bringUp () {
 
   statsTimer = setInterval(() => worker?.postMessage({ type: 'stats' }), 1000);
   setRunning(true);
+  ensureAudible();
 }
 
-$('start').onclick = async () => {
+/* Политика автозапуска звука: без жеста пользователя AudioContext стартует
+   в состоянии suspended, а тогда не работают и AudioWorklet-ы — то есть встанет
+   не только воспроизведение, но и захват. Поэтому один щелчок всё равно нужен;
+   всё остальное можно не спрашивать. */
+function ensureAudible () {
+  if (!ctx || ctx.state !== 'suspended') return;
+  $('status').textContent = 'Браузер не разрешает звук без действия — щёлкните по странице.';
+  log('Звук ждёт первого щелчка по странице: таково правило автозапуска в Chrome.', 'warn');
+  const resume = async () => {
+    await ctx?.resume();
+    if (ctx?.state === 'running') $('status').textContent = 'Декодер запущен.';
+  };
+  addEventListener('pointerdown', resume, { once: true });
+  addEventListener('keydown', resume, { once: true });
+}
+
+$('start').onclick = () => startCapture();
+
+async function startCapture () {
   try {
     await bringUp();
     stream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS($('dev').value));
+    // запоминаем то, что реально открылось, а не то, что было выбрано в списке
+    const st = stream.getAudioTracks()[0];
+    if (st?.getSettings().deviceId) prefs.set('audioDeviceId', st.getSettings().deviceId);
+    if (st?.label) prefs.set('audioDeviceLabel', st.label);
+
     const src = ctx.createMediaStreamSource(stream);
     capture = new AudioWorkletNode(ctx, 'capture', {
       numberOfInputs: 1, numberOfOutputs: 0,
@@ -151,13 +211,12 @@ $('start').onclick = async () => {
                            [d.i.buffer, d.q.buffer]);
       }
     };
-    $('status').textContent = 'Запуск декодера…';
   } catch (err) {
     log('ОШИБКА запуска: ' + err.message, 'bad');
     $('status').textContent = 'Ошибка: ' + err.message;
     stopAll();
   }
-};
+}
 
 /* Самопроверка: эталонная запись вместо радио, подаётся уже демодулированной
    в темпе реального времени. Если тут лог идёт и голос слышен, а с радио нет —
@@ -184,7 +243,6 @@ $('selftest').onclick = async () => {
       off += STEP;
       worker.postMessage({ type: 'feed-pcm', pcm: chunk }, [chunk.buffer]);
     }, 100);
-    $('status').textContent = 'Самопроверка идёт, звук должен пойти через несколько секунд.';
   } catch (err) {
     log('ОШИБКА самопроверки: ' + err.message, 'bad');
     stopAll();
@@ -231,14 +289,46 @@ function applySlot () {
 function applyVolume () { if (master) master.gain.value = +$('vol').value / 100; }
 
 document.querySelectorAll('input[name=slot]').forEach(r => r.onchange = applySlot);
-$('vol').oninput = applyVolume;
-$('center').onchange = () => worker?.postMessage({ type: 'center', hz: +$('center').value });
+$('vol').oninput = () => { applyVolume(); prefs.set('volume', +$('vol').value); };
+$('center').onchange = () => {
+  prefs.set('centerHz', +$('center').value);
+  worker?.postMessage({ type: 'center', hz: +$('center').value });
+};
 const sendSquelch = () => {
   $('squelchVal').textContent = $('squelch').value + ' дБ';
+  prefs.set('squelchDb', +$('squelch').value);
+  prefs.set('squelchOn', $('squelchOn').checked);
   worker?.postMessage({ type: 'squelch', db: $('squelchOn').checked ? +$('squelch').value : null });
 };
 $('squelch').oninput = sendSquelch;
 $('squelchOn').onchange = sendSquelch;
+
+$('autoStart').onchange = () => prefs.set('autoStart', $('autoStart').checked);
+
+/* ---------- восстановление при загрузке ---------- */
+
+(async function restore () {
+  $('vol').value = prefs.get('volume', 80);
+  $('center').value = prefs.get('centerHz', 12060);
+  $('squelch').value = prefs.get('squelchDb', -16);
+  $('squelchOn').checked = prefs.get('squelchOn', true);
+  $('squelchVal').textContent = $('squelch').value + ' дБ';
+  $('autoStart').checked = prefs.get('autoStart', false);
+
+  if (!await micGranted()) {
+    $('status').textContent = 'Начните с разрешения доступа к звуку — дальше выбор запомнится.';
+    return;
+  }
+  // разрешение сохранилось с прошлого раза: метки и deviceId доступны без запроса
+  const d = await fillDevices();
+  if (!d) { $('status').textContent = 'Звуковых входов не найдено.'; return; }
+  $('status').textContent = `Устройство запомнено: ${d.label}.`;
+
+  if ($('autoStart').checked) {
+    log(`автозапуск: ${d.label}`, 'dim');
+    startCapture();
+  }
+})();
 
 // CI-V независим от аудиотракта: декодер работает без CAT, CAT полезен без декодера
 initRadio({ log });
