@@ -35,10 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
+      # setup-node намеренно не используется: Node на раннере уже есть, а каждое
+      # лишнее действие — ещё одна загрузка с codeload.github.com, которая может
+      # получить 429 ещё до запуска наших шагов (так и случилось однажды).
       - name: Ninja
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
 
