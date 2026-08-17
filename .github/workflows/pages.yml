@@ -48,7 +48,14 @@ jobs:
       - name: Emscripten
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$EMSDK_DIR"
-          "$EMSDK_DIR/emsdk" install "$EMSDK_VERSION"
+          # 429 при загрузке случается и просто от занятости — пробуем трижды
+          ok=
+          for i in 1 2 3; do
+            if "$EMSDK_DIR/emsdk" install "$EMSDK_VERSION"; then ok=1; break; fi
+            echo "попытка $i не удалась, ждём $((i * 20)) с"
+            sleep $((i * 20))
+          done
+          [ -n "$ok" ] || { echo "emsdk не установился"; exit 1; }
           "$EMSDK_DIR/emsdk" activate "$EMSDK_VERSION"
           source "$EMSDK_DIR/emsdk_env.sh"
           emcc --version | head -1
