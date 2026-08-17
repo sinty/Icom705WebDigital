@@ -48,6 +48,126 @@ export function firdesLowPass (gain, fs, cutoff, transition) {
   return taps;
 }
 
+/** БПФ на месте, длина — степень двойки. */
+export function fft (re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const ar = re[i + k], ai = im[i + k];
+        const br = re[i + k + half], bi = im[i + k + half];
+        const vr = br * cr - bi * ci, vi = br * ci + bi * cr;
+        re[i + k] = ar + vr; im[i + k] = ai + vi;
+        re[i + k + half] = ar - vr; im[i + k + half] = ai - vi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+
+/**
+ * Оценка фактической частоты несущей ПЧ.
+ *
+ * Нужна потому, что уход у каждого передатчика свой: зашитые 12060 Гц — лишь
+ * компромисс, а промах по центру выглядит как «синхронизация есть, но пакеты
+ * не проходят FEC». Меряется по вещественному каналу: ПЧ IC-705 и так
+ * вещественная (см. NOTES.md).
+ *
+ * Два решения, без которых оценка врёт на сотни герц:
+ *  - спектр УСРЕДНЯЕТСЯ по многим блокам: у модулированной несущей мгновенный
+ *    пик гуляет по всему «горбу»;
+ *  - берётся ЦЕНТР ТЯЖЕСТИ горба, а не его пик: центр стоит на месте, пик нет.
+ */
+export class CarrierEstimator {
+  constructor (o = {}) {
+    const { sampleRate = SAMPLE_RATE, n = 2048, lo = 8000, hi = 16000, blocks = 24 } = o;
+    this.fs = sampleRate;
+    this.n = n;
+    this.lo = lo;
+    this.hi = hi;
+    this.need = blocks;
+    this.acc = new Float64Array(n >> 1);
+    this.count = 0;
+    this.re = new Float64Array(n);
+    this.im = new Float64Array(n);
+    this.win = new Float64Array(n);
+    for (let i = 0; i < n; i++) this.win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / n);
+  }
+
+  /** Накопить один блок; блоки короче n игнорируются. */
+  push (x) {
+    const { n, win, re, im, acc } = this;
+    if (x.length < n) return;
+    for (let i = 0; i < n; i++) { re[i] = x[i] * win[i]; im[i] = 0; }
+    fft(re, im);
+    for (let k = 0; k < (n >> 1); k++) acc[k] += re[k] * re[k] + im[k] * im[k];
+    this.count++;
+  }
+
+  get ready () { return this.count >= this.need; }
+
+  /** @returns {?{hz: number, snrDb: number}} и сбрасывает накопление */
+  result () {
+    if (!this.count) return null;
+    const { acc, n, fs, lo, hi } = this;
+    const binHz = fs / n;
+    const k0 = Math.max(1, Math.ceil(lo / binHz));
+    const k1 = Math.min((n >> 1) - 2, Math.floor(hi / binHz));
+
+    let out = null;
+    if (k1 > k0) {
+      let peak = k0, peakP = -1;
+      const band = [];
+      for (let k = k0; k <= k1; k++) {
+        band.push(acc[k]);
+        if (acc[k] > peakP) { peakP = acc[k]; peak = k; }
+      }
+      // Шумовая полка — НИЗКИЙ процентиль, не медиана: сигнал занимает бóльшую
+      // часть полосы 8–16 кГц, и медиана попадает внутрь него, обнуляя оценку SNR.
+      band.sort((a, b) => a - b);
+      const floorP = band[Math.floor(band.length * 0.15)] || 1e-30;
+      const snrDb = 10 * Math.log10((peakP || 1e-30) / floorP);
+
+      if (snrDb >= 6) {
+        const thr = peakP * 0.1;              // −10 дБ от пика: границы горба
+        const span = Math.round(4000 / binHz);
+        let num = 0, den = 0;
+        for (let k = Math.max(k0, peak - span); k <= Math.min(k1, peak + span); k++) {
+          if (acc[k] < thr) continue;
+          num += acc[k] * k;
+          den += acc[k];
+        }
+        if (den > 0) out = { hz: (num / den) * binHz, snrDb };
+      }
+    }
+
+    this.acc.fill(0);
+    this.count = 0;
+    return out;
+  }
+}
+
+/** Разовая оценка по готовому куску: усредняет по всем блокам, что в нём есть. */
+export function estimateCarrier (x, fs, lo = 8000, hi = 16000) {
+  const est = new CarrierEstimator({ sampleRate: fs, lo, hi });
+  for (let off = 0; off + est.n <= x.length; off += est.n) {
+    est.push(x.subarray(off, off + est.n));
+  }
+  return est.result();
+}
+
 export class IfDemodulator {
   /**
    * @param {object} [o]

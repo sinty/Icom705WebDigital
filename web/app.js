@@ -144,6 +144,7 @@ async function bringUp () {
       case 'log':     if (d.line.trim()) log(d.line); break;
       case 'stream':  if (d.dir !== 2) log(`выход декодера: ${d.rate} Гц, ${d.ch} кан`, 'dim'); break;
       case 'pcm':     playback.port.postMessage({ type: 'pcm', pcm: d.pcm, channels: 2 }, [d.pcm.buffer]); break;
+      case 'level':   showLevel(d); break;
       case 'overrun': $('dropped').textContent = d.dropped; break;
       case 'stats':
         $('buffered').textContent = (d.buffered / 48000).toFixed(2) + ' с';
@@ -279,6 +280,48 @@ function stopAll () {
 }
 
 $('stop').onclick = () => { stopAll(); $('status').textContent = 'Остановлено.'; };
+
+/* Показ измерений по сырому входу. Ориентиры взяты с эталонной записи, на
+   которой декодирование заведомо работает: пик 0.377, несущая около 12.1 кГц. */
+let measuredCarrier = null;
+
+function showLevel (d) {
+  const pk = d.peak ?? 0;
+  $('lvlPeak').textContent = pk.toFixed(3) + '  (' + d.rmsDb.toFixed(0) + ' дБ)';
+  $('lvlBar').style.width = Math.min(100, pk * 100).toFixed(0) + '%';
+  // ниже 0.05 сигнала почти нет, выше 0.95 клиппинг АЦП кодека
+  $('lvlPeak').className = pk < 0.05 ? 'bad' : (pk < 0.12 || pk > 0.95) ? 'warn' : 'ok';
+
+  measuredCarrier = d.carrierHz;
+  if (d.carrierHz == null) {
+    $('carrier').textContent = 'нет несущей';
+    $('carrier').className = 'dim';
+    $('useCarrier').disabled = true;
+    $('carrierHint').textContent = pk < 0.05
+      ? 'Уровень почти нулевой: проверьте режим IF и IF Output Level на радио.'
+      : 'В полосе 8–16 кГц нет выраженного пика — вероятно, нет передачи.';
+    return;
+  }
+
+  const off = d.carrierHz - (+$('center').value || 12060);
+  $('carrier').textContent = `${d.carrierHz.toFixed(0)} Гц (${d.snrDb.toFixed(0)} дБ)`;
+  $('carrier').className = Math.abs(off) < 300 ? 'ok' : 'warn';
+  $('useCarrier').disabled = Math.abs(off) < 30;
+  $('carrierHint').textContent = Math.abs(off) < 300
+    ? `Отклонение от центра ${off > 0 ? '+' : ''}${off.toFixed(0)} Гц — в норме.`
+    : `Центр смещён на ${off > 0 ? '+' : ''}${off.toFixed(0)} Гц. ` +
+      'Это и выглядит как «синхронизация есть, а пакеты не проходят FEC».';
+}
+
+$('useCarrier').onclick = () => {
+  if (measuredCarrier == null) return;
+  const hz = Math.round(measuredCarrier);
+  $('center').value = hz;
+  prefs.set('centerHz', hz);
+  worker?.postMessage({ type: 'center', hz });
+  log(`центр ПЧ переставлен на измеренные ${hz} Гц`, 'dim');
+  $('useCarrier').disabled = true;
+};
 
 function applySlot () {
   if (!gainL) return;

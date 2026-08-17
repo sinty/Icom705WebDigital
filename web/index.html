@@ -153,9 +153,19 @@
   <h2>Состояние</h2>
   <div class="stats">
     <div><b>Каналов</b><span id="channels" class="dim">—</span></div>
+    <div style="min-width:190px">
+      <b>Уровень входа</b>
+      <span id="lvlPeak" class="dim">—</span>
+      <div class="meter"><div id="lvlBar"></div></div>
+    </div>
+    <div><b>Несущая ПЧ</b><span id="carrier" class="dim">—</span></div>
     <div><b>В буфере</b><span id="buffered" class="dim">—</span></div>
     <div><b>Простой декодера</b><span id="starve" class="dim">—</span></div>
     <div><b>Потеряно отсчётов</b><span id="dropped" class="dim">0</span></div>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button id="useCarrier" class="sec" disabled>Принять измеренную несущую как центр</button>
+    <span id="carrierHint" class="hint" style="margin:0"></span>
   </div>
 </div>
 

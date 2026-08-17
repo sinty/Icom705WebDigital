@@ -15,10 +15,13 @@
 const V = new URL(self.location.href).searchParams.get('v');
 const q = V ? `?v=${encodeURIComponent(V)}` : '';
 
-let IfDemodulator = null, IF_CENTER_HZ = 12060, SQUELCH_DB = -16, createDsdModule = null;
+let IfDemodulator = null, CarrierEstimator = null;
+let IF_CENTER_HZ = 12060, SQUELCH_DB = -16, createDsdModule = null;
 
 let mod = null;
 let demod = null;
+let carrier = null;               // оценщик фактической несущей
+let lvlPeak = 0, lvlSum = 0, lvlCount = 0;
 let scratch = 0, scratchSamples = 0;
 let pending = null;          // хвост, не влезший в кольцевой буфер
 let fedTotal = 0, droppedTotal = 0;
@@ -28,7 +31,7 @@ const post = (type, extra) => self.postMessage({ type, ...extra });
 async function loadDeps () {
   try {
     const dsp = await import(`../dsp/iq-demod.js${q}`);
-    ({ IfDemodulator, IF_CENTER_HZ, SQUELCH_DB } = dsp);
+    ({ IfDemodulator, CarrierEstimator, IF_CENTER_HZ, SQUELCH_DB } = dsp);
   } catch (err) {
     post('fatal', { where: 'dsp/iq-demod.js', message: String(err?.message ?? err) });
     throw err;
@@ -93,6 +96,7 @@ self.onmessage = async e => {
       center: d.center ?? IF_CENTER_HZ,
       squelchDb: d.squelchDb ?? SQUELCH_DB,
     });
+    carrier = new CarrierEstimator({ sampleRate: d.sampleRate ?? 48000 });
 
     // Кольцевой буфер заранее не создаём — всё, записанное до callMain,
     // обнуляется при инициализации рантайма (NOTES.md).
@@ -106,6 +110,28 @@ self.onmessage = async e => {
 
   if (d.type === 'iq') {
     if (!demod || !mod) return;
+
+    /* Измерения по сырому входу — без них не отличить «слабый сигнал» от
+       «не тот центр», а оба выглядят одинаково: синхронизация есть, пакеты
+       не проходят FEC. */
+    for (let k = 0; k < d.i.length; k++) {
+      const a = d.i[k] < 0 ? -d.i[k] : d.i[k];
+      if (a > lvlPeak) lvlPeak = a;
+      lvlSum += d.i[k] * d.i[k];
+    }
+    lvlCount += d.i.length;
+    carrier.push(d.i);
+    if (carrier.ready) {
+      const est = carrier.result();
+      post('level', {
+        peak: lvlPeak,
+        rmsDb: 10 * Math.log10(lvlSum / Math.max(1, lvlCount) + 1e-30),
+        carrierHz: est?.hz ?? null,
+        snrDb: est?.snrDb ?? null,
+      });
+      lvlPeak = 0; lvlSum = 0; lvlCount = 0;
+    }
+
     if (pending) {
       pending = feed(pending);
       if (pending) { noteOverrun(d.i.length); return; }
