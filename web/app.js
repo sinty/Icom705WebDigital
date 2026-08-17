@@ -296,32 +296,23 @@ function showLevel (d) {
   if (d.carrierHz == null) {
     $('carrier').textContent = 'нет несущей';
     $('carrier').className = 'dim';
-    $('useCarrier').disabled = true;
     $('carrierHint').textContent = pk < 0.05
       ? 'Уровень почти нулевой: проверьте режим IF и IF Output Level на радио.'
       : 'В полосе 8–16 кГц нет выраженного пика — вероятно, нет передачи.';
     return;
   }
 
+  /* Только показываем. Применять эту оценку как центр — плохая идея: у 4FSK
+     центр тяжести спектра не совпадает с точкой, по которой демодулятору
+     выгоднее работать, и подстановка делала звук хуже, а не лучше.
+     Проверенные 12060 Гц остаются компромиссом по умолчанию. */
   const off = d.carrierHz - (+$('center').value || 12060);
   $('carrier').textContent = `${d.carrierHz.toFixed(0)} Гц (${d.snrDb.toFixed(0)} дБ)`;
-  $('carrier').className = Math.abs(off) < 300 ? 'ok' : 'warn';
-  $('useCarrier').disabled = Math.abs(off) < 30;
-  $('carrierHint').textContent = Math.abs(off) < 300
-    ? `Отклонение от центра ${off > 0 ? '+' : ''}${off.toFixed(0)} Гц — в норме.`
-    : `Центр смещён на ${off > 0 ? '+' : ''}${off.toFixed(0)} Гц. ` +
-      'Это и выглядит как «синхронизация есть, а пакеты не проходят FEC».';
+  $('carrier').className = Math.abs(off) < 600 ? 'ok' : 'warn';
+  $('carrierHint').textContent =
+    `Отклонение от центра ${off > 0 ? '+' : ''}${off.toFixed(0)} Гц. ` +
+    'Показано для справки — центр менять вручную и только если станет лучше на слух.';
 }
-
-$('useCarrier').onclick = () => {
-  if (measuredCarrier == null) return;
-  const hz = Math.round(measuredCarrier);
-  $('center').value = hz;
-  prefs.set('centerHz', hz);
-  worker?.postMessage({ type: 'center', hz });
-  log(`центр ПЧ переставлен на измеренные ${hz} Гц`, 'dim');
-  $('useCarrier').disabled = true;
-};
 
 function applySlot () {
   if (!gainL) return;
@@ -333,14 +324,10 @@ function applyVolume () { if (master) master.gain.value = +$('vol').value / 100;
 
 document.querySelectorAll('input[name=slot]').forEach(r => r.onchange = applySlot);
 $('vol').oninput = () => { applyVolume(); prefs.set('volume', +$('vol').value); };
-$('center').onchange = () => {
-  prefs.set('centerHz', +$('center').value);
-  worker?.postMessage({ type: 'center', hz: +$('center').value });
-};
+// центр и сквелч не сохраняются: см. пояснение в restore()
+$('center').onchange = () => worker?.postMessage({ type: 'center', hz: +$('center').value });
 const sendSquelch = () => {
   $('squelchVal').textContent = $('squelch').value + ' дБ';
-  prefs.set('squelchDb', +$('squelch').value);
-  prefs.set('squelchOn', $('squelchOn').checked);
   worker?.postMessage({ type: 'squelch', db: $('squelchOn').checked ? +$('squelch').value : null });
 };
 $('squelch').oninput = sendSquelch;
@@ -352,11 +339,21 @@ $('autoStart').onchange = () => prefs.set('autoStart', $('autoStart').checked);
 
 (async function restore () {
   $('vol').value = prefs.get('volume', 80);
-  $('center').value = prefs.get('centerHz', 12060);
-  $('squelch').value = prefs.get('squelchDb', -16);
-  $('squelchOn').checked = prefs.get('squelchOn', true);
-  $('squelchVal').textContent = $('squelch').value + ' дБ';
   $('autoStart').checked = prefs.get('autoStart', false);
+
+  /* Параметры тракта НЕ запоминаются намеренно.
+     Раньше они сохранялись, и это оказалось ловушкой: стоило один раз
+     подвинуть сквелч или принять измеренную несущую как центр — и значение
+     молча применялось при каждой следующей загрузке. На слух это ошибки
+     вокодера («подквакивание»), а причину не видно.
+     Теперь каждый запуск начинается с проверенных 12060 Гц и −16 дБ. */
+  prefs.del('centerHz');
+  prefs.del('squelchDb');
+  prefs.del('squelchOn');
+  $('center').value = 12060;
+  $('squelch').value = -16;
+  $('squelchOn').checked = true;
+  $('squelchVal').textContent = '-16 дБ';
 
   if (!await micGranted()) {
     $('status').textContent = 'Начните с разрешения доступа к звуку — дальше выбор запомнится.';
