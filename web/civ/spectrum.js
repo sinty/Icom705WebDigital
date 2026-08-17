@@ -184,9 +184,11 @@ export class ScopeView {
       px[i * 4] = LUT[c]; px[i * 4 + 1] = LUT[c + 1]; px[i * 4 + 2] = LUT[c + 2];
       px[i * 4 + 3] = 255;
     }
-    // сдвигаем историю на строку вверх и дописываем новую снизу
-    this.wfg.drawImage(this.wf, 0, -1);
-    this.wfg.putImageData(this.line, 0, this.history - 1);
+    // Направление как на IC-705: новая строка появляется СВЕРХУ, вплотную к
+    // спектру, история уезжает вниз. Это отличается от привычных SDR-водопадов,
+    // где новое дописывается снизу.
+    this.wfg.drawImage(this.wf, 0, 1);
+    this.wfg.putImageData(this.line, 0, 0);
     this.redraw();
   }
 
