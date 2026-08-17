@@ -132,7 +132,16 @@ export class CivPort {
       let i = -1;
       for (let k = 0; k + 1 < this.buf.length; k++)
         if (this.buf[k] === 0xfe && this.buf[k + 1] === 0xfe) { i = k; break; }
-      if (i < 0) { this.buf = new Uint8Array(0); return; }
+      if (i < 0) {
+        // Начала нет. Последний байт сохраняем: если это FE, а следующий чанк
+        // начнётся с FE, иначе потеряем кадр на стыке. Заодно страхуемся от
+        // разрастания буфера, если в порт течёт мусор.
+        const tail = this.buf.length && this.buf[this.buf.length - 1] === 0xfe ? 1 : 0;
+        this.buf = this.buf.length > 8192 || !tail
+          ? new Uint8Array(tail ? [0xfe] : 0)
+          : this.buf.subarray(this.buf.length - 1);
+        return;
+      }
       if (i > 0) this.buf = this.buf.subarray(i);
 
       const j = this.buf.indexOf(0xfd, 2);

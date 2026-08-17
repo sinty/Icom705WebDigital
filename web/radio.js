@@ -107,6 +107,17 @@ export function initRadio ({ log }) {
           $('smeterText').textContent = sUnits(raw);
           $('smeterBar').style.width = Math.min(100, raw / 255 * 100).toFixed(1) + '%';
         }
+
+        // Счётчик потерь: если он растёт, кадры панорамы теряются на шине,
+        // и дело не в отрисовке. Целые развёртки собираются по номерам
+        // сегментов, поэтому рваные просто отбрасываются, а не сдвигают спектр.
+        if (assembler) {
+          const { seq, damaged, orphans } = assembler;
+          $('scopeLoss').textContent = damaged || orphans
+            ? `развёрток ${seq} · рвано ${damaged} · без заголовка ${orphans}`
+            : `развёрток ${seq}`;
+          $('scopeLoss').className = damaged > seq * 0.2 ? 'warn' : 'dim';
+        }
       } catch (err) {
         log?.('CI-V: опрос прервался — ' + err.message, 'bad');
         polling = false;

@@ -21,14 +21,23 @@ import { bcdToFreq, fromBcd } from './civ.js';
 export const POINTS = 475;
 export const AMP_MAX = 0xa0;      // верх шкалы амплитуды в кадрах IC-705
 
+/** Длина сегмента данных по умолчанию: 9 кадров по 50 плюс 25 = 475 точек. */
+const SEG_DEFAULT = 50;
+
 export class SpectrumAssembler {
   constructor (onRow) {
     this.onRow = onRow ?? null;
     this.row = new Uint8Array(POINTS);
-    this.pos = 0;
     this.centerHz = null;
     this.spanHz = null;
     this.seq = 0;                 // монотонный счётчик готовых развёрток
+    this.damaged = 0;             // развёрток отброшено из-за потерянных кадров
+    this.orphans = 0;             // кадров данных пришло без заголовка развёртки
+
+    this.seg = SEG_DEFAULT;
+    this.seqMax = 0;
+    this.got = null;              // отметки принятых сегментов
+    this.open = false;            // идёт ли сбор развёртки
   }
 
   /** Вызывать на каждый кадр: body — тело БЕЗ ведущих байт 27 00. */
@@ -39,27 +48,40 @@ export class SpectrumAssembler {
     const payload = body.subarray(3);
 
     if (seq === 1) {
-      if (payload.length < 12) return;
       // mode 0 — режим центра: дальше идут центр и половина обзора
-      if (payload[0] === 0) {
+      if (payload.length >= 12 && payload[0] === 0) {
         this.centerHz = bcdToFreq(payload.subarray(1, 6));
         this.spanHz = bcdToFreq(payload.subarray(6, 11)) * 2;
       }
       this.row = new Uint8Array(POINTS);
-      this.pos = 0;
+      this.seqMax = seqMax;
+      this.got = new Uint8Array(seqMax + 2);
+      this.open = true;
       return;
     }
 
-    const end = Math.min(POINTS, this.pos + payload.length);
-    this.row.set(payload.subarray(0, end - this.pos), this.pos);
-    this.pos = end;
+    // развёртка началась не с заголовка — собирать нечего, ждём следующую
+    if (!this.open) { this.orphans++; return; }
 
-    if (seq === seqMax) {
-      this.seq++;
-      this.onRow?.({
-        data: this.row, centerHz: this.centerHz, spanHz: this.spanHz, seq: this.seq,
-      });
+    // Сегмент кладём по ЕГО НОМЕРУ, а не по бегущей позиции: при потере одного
+    // кадра иначе сдвигается всё, что идёт после него, и спектр «уезжает».
+    if (seq === 2 && payload.length) this.seg = payload.length;
+    const off = (seq - 2) * this.seg;
+    if (off < 0 || off >= POINTS) return;
+    this.row.set(payload.subarray(0, Math.min(payload.length, POINTS - off)), off);
+    this.got[seq] = 1;
+
+    if (seq !== this.seqMax) return;
+    this.open = false;
+
+    for (let s = 2; s <= this.seqMax; s++) {
+      if (!this.got[s]) { this.damaged++; return; }   // рваную развёртку не показываем
     }
+
+    this.seq++;
+    this.onRow?.({
+      data: this.row, centerHz: this.centerHz, spanHz: this.spanHz, seq: this.seq,
+    });
   }
 
   /** Частота точки развёртки по её индексу — для перестройки кликом. */
