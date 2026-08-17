@@ -12,10 +12,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# contents: write нужен, чтобы публиковать собранный сайт в ветку gh-pages.
+# Механизм Pages-через-Actions не используется намеренно: он требует загрузки
+# actions/upload-pages-artifact и actions/deploy-pages с codeload.github.com,
+# а тот отдавал 429 и 503 — сборка падала не доходя до своих шагов.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -123,16 +125,19 @@ jobs:
           touch _site/.nojekyll
           du -sh _site
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      # Публикуем обычным git, без действий Pages. Ветка каждый раз создаётся
+      # заново и пушится с --force: это вывод сборки, история ему не нужна и
+      # только раздувала бы репозиторий.
+      - name: Публикация в ветку gh-pages
+        working-directory: _site
+        run: |
+          git init -q
+          git checkout -qb gh-pages
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -qm "сборка сайта из ${GITHUB_SHA:0:7}"
+          git push -q --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          echo "опубликовано: https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}/"
