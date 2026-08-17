@@ -23,7 +23,8 @@ const CONSTRAINTS = dev => ({
 });
 
 let ctx = null, stream = null, worker = null, playback = null, capture = null;
-let gainL = null, gainR = null, master = null;
+let gainL = null, gainR = null, master = null, merge = null;
+let fxHp = null, fxShelf = null, fxLp = null;
 let statsTimer = null, selfTestTimer = null;
 let logCount = 0;
 
@@ -114,13 +115,26 @@ async function bringUp () {
     processorOptions: { srcRate: 8000 },
   });
   const split = ctx.createChannelSplitter(2);
-  const merge = ctx.createChannelMerger(2);
+  merge = ctx.createChannelMerger(2);
   gainL = ctx.createGain(); gainR = ctx.createGain(); master = ctx.createGain();
   playback.connect(split);
   split.connect(gainL, 0); split.connect(gainR, 1);
   gainL.connect(merge, 0, 0); gainR.connect(merge, 0, 1);
-  merge.connect(master); master.connect(ctx.destination);
-  applySlot(); applyVolume();
+
+  /* Фильтр-цепочка вывода — та же, что на Pi (deploy/speaker-fx.conf):
+     срез инфранизких (гул и «плюхи» сквелча), мягкий завал верхов вместо
+     деэмфазиса, срез шипения выше полосы голоса. Побочная польза: пересчёт
+     8 → 48 кГц у нас линейный, и его зеркала лежат выше 4.4 кГц — ФНЧ 3.6 кГц
+     их же и убирает. */
+  fxHp = ctx.createBiquadFilter();
+  fxHp.type = 'highpass'; fxHp.frequency.value = 270; fxHp.Q.value = 0.707;
+  fxShelf = ctx.createBiquadFilter();
+  fxShelf.type = 'highshelf'; fxShelf.frequency.value = 1800; fxShelf.gain.value = -5;
+  fxLp = ctx.createBiquadFilter();
+  fxLp.type = 'lowpass'; fxLp.frequency.value = 3600; fxLp.Q.value = 0.707;
+
+  master.connect(ctx.destination);
+  applyFx(); applySlot(); applyVolume();
 
   // Версия в URL пробивает кеш браузера: он мог запомнить модули с прежним,
   // неверным типом содержимого, и тогда они не исполняются молча.
@@ -158,6 +172,8 @@ async function bringUp () {
     sampleRate: ctx.sampleRate,
     center: +$('center').value || 12060,
     squelchDb: $('squelchOn').checked ? +$('squelch').value : null,
+    // -u задаётся только при запуске: dsd-fme читает его из аргументов
+    uvquality: +$('uvq').value || 3,
   });
 
   statsTimer = setInterval(() => worker?.postMessage({ type: 'stats' }), 1000);
@@ -322,6 +338,23 @@ function applySlot () {
 }
 function applyVolume () { if (master) master.gain.value = +$('vol').value / 100; }
 
+/** Включение и обход фильтр-цепочки: слушать разницу проще, чем рассуждать о ней. */
+function applyFx () {
+  if (!merge || !master) return;
+  for (const n of [merge, fxHp, fxShelf, fxLp]) { try { n.disconnect(); } catch {} }
+  if ($('fxOn').checked) {
+    merge.connect(fxHp); fxHp.connect(fxShelf); fxShelf.connect(fxLp); fxLp.connect(master);
+  } else {
+    merge.connect(master);
+  }
+  prefs.set('fxOn', $('fxOn').checked);
+}
+$('fxOn').onchange = applyFx;
+$('uvq').onchange = () => {
+  prefs.set('uvq', +$('uvq').value);
+  if (worker) log('Качество невокализованных участков применится при следующем запуске.', 'warn');
+};
+
 document.querySelectorAll('input[name=slot]').forEach(r => r.onchange = applySlot);
 $('vol').oninput = () => { applyVolume(); prefs.set('volume', +$('vol').value); };
 // центр и сквелч не сохраняются: см. пояснение в restore()
@@ -340,6 +373,8 @@ $('autoStart').onchange = () => prefs.set('autoStart', $('autoStart').checked);
 (async function restore () {
   $('vol').value = prefs.get('volume', 80);
   $('autoStart').checked = prefs.get('autoStart', false);
+  $('fxOn').checked = prefs.get('fxOn', true);
+  $('uvq').value = String(prefs.get('uvq', 3));
 
   /* Параметры тракта НЕ запоминаются намеренно.
      Раньше они сохранялись, и это оказалось ловушкой: стоило один раз

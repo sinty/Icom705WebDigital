@@ -97,6 +97,17 @@
     <input type="range" id="vol" min="0" max="100" value="80" style="width:130px">
   </div>
   <div class="row">
+    <label title="Полоса голоса как на Pi: ФВЧ 270 Гц, полка -5 дБ выше 1.8 кГц, ФНЧ 3.6 кГц"><input type="checkbox" id="fxOn" checked> фильтр голосовой полосы</label>
+    <label>Невокализованные участки</label>
+    <select id="uvq" style="min-width:150px" title="Параметр -u в mbelib: сколькими синусоидами синтезируется шумовая часть речи. Применяется при запуске.">
+      <option value="3">3 — как на Pi</option>
+      <option value="8">8</option>
+      <option value="16">16</option>
+      <option value="32">32</option>
+      <option value="64">64 — максимум</option>
+    </select>
+  </div>
+  <div class="row">
     <label title="Запуск при открытии страницы. Один щелчок по странице всё равно нужен: браузер не даёт включить звук без действия."><input type="checkbox" id="autoStart"> запускать сразу при открытии</label>
   </div>
   <div class="row"><span id="status">Начните с разрешения доступа к звуку.</span></div>

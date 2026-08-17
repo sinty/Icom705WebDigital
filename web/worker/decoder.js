@@ -100,7 +100,11 @@ self.onmessage = async e => {
 
     // Кольцевой буфер заранее не создаём — всё, записанное до callMain,
     // обнуляется при инициализации рантайма (NOTES.md).
-    mod.callMain(['-fs', '-i', 'pulse', '-o', 'pulse']);
+    // -u: качество синтеза невокализованных участков в mbelib, 1..64.
+    // По умолчанию у dsd-fme стоит 3 — почти минимум; запаса по процессору
+    // у нас пятикратный, так что поднимать можно.
+    const uv = Math.max(1, Math.min(64, d.uvquality ?? 3));
+    mod.callMain(['-fs', '-i', 'pulse', '-o', 'pulse', '-u', String(uv)]);
     post('ready');
     return;
   }
