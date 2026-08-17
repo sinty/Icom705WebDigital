@@ -139,17 +139,23 @@ export function initRadio ({ log }) {
   }
 
   /* ---------- соединение ---------- */
-  /** @param {SerialPort} [port] уже выданный порт; без него будет показан выбор */
-  async function connect (port) {
+  /**
+   * @param {SerialPort} [port]  уже выданный порт; без него будет показан выбор
+   * @param {boolean} [quiet]    не сообщать о неудаче: используется при опросе
+   *                             нескольких кандидатов, где отказ — норма
+   */
+  async function connect (port, quiet = false) {
     try {
-      say(port ? 'Открываю запомненный CAT-порт…' : 'Выберите CAT-порт радио…');
+      if (!quiet) say(port ? 'Открываю запомненный CAT-порт…' : 'Выберите CAT-порт радио…');
       await civ.open(port ?? await civ.requestPort({ all: $('civAllPorts').checked }));
       civ.onError = err => log?.('CI-V: порт отвалился — ' + err.message, 'bad');
 
       const hz = await civ.readFrequency();
       if (hz == null) {
-        say('Порт открыт, но радио не отвечает. Проверьте CI-V Address = A4h и скорость (Auto).');
-        log?.('CI-V: ответа на запрос частоты нет. Если открыт wfview или WSJT-X — порт занят им.', 'warn');
+        if (!quiet) {
+          say('Порт открыт, но радио не отвечает. Проверьте CI-V Address = A4h и скорость (Auto).');
+          log?.('CI-V: ответа на запрос частоты нет. Если открыт wfview или WSJT-X — порт занят им.', 'warn');
+        }
         await civ.close();
         return false;
       }
@@ -172,43 +178,56 @@ export function initRadio ({ log }) {
       return true;
     } catch (err) {
       // отказ пользователя от выбора порта — не ошибка
-      say(err.name === 'NotFoundError'
-        ? 'Порт не выбран. Если радио нет в списке — поставьте «показать все порты».'
-        : 'CI-V: ' + err.message);
+      if (!quiet)
+        say(err.name === 'NotFoundError'
+          ? 'Порт не выбран. Если радио нет в списке — поставьте «показать все порты».'
+          : 'CI-V: ' + err.message);
       return false;
     }
   }
 
   $('civConnect').onclick = () => connect();
 
-  /** Подобрать среди уже выданных портов тот, что запомнен. */
-  async function findRemembered () {
+  /**
+   * Найти радио среди уже выданных портов, опрашивая их запросом частоты.
+   *
+   * Угадывать по VID/PID недостаточно: пользователь мог однажды выдать доступ
+   * и не к тому порту, и тогда кандидатов несколько. Поэтому поступаем как
+   * autodetect_port в civ.py соседнего проекта — открываем и спрашиваем
+   * частоту; отвечает тот, который и нужен. Запомненный пробуем первым.
+   */
+  async function autoConnect (why) {
     const ports = await navigator.serial.getPorts();
-    if (!ports.length) return null;
+    if (!ports.length) return false;
+
     const want = prefs.get('civPort');
-    if (want) {
-      const m = ports.find(p => {
-        const i = p.getInfo?.() ?? {};
-        return i.usbVendorId === want.vid && (want.pid == null || i.usbProductId === want.pid);
-      });
-      if (m) return m;
+    const fits = p => {
+      const i = p.getInfo?.() ?? {};
+      return want && i.usbVendorId === want.vid &&
+             (want.pid == null || i.usbProductId === want.pid) ? 1 : 0;
+    };
+    const ordered = [...ports].sort((a, b) => fits(b) - fits(a));
+
+    for (const p of ordered) {
+      if (await connect(p, true)) return true;
     }
-    return ports.length === 1 ? ports[0] : null;
+    say(`${why}: выдано портов ${ports.length}, ни один не ответил на CI-V. ` +
+        'Нажмите «Подключить CAT-порт» и выберите нужный.');
+    return false;
   }
 
   /* Порт, выданный однажды, возвращается getPorts() без жеста пользователя —
      поэтому со второго раза выбирать его уже не нужно. */
   (async function restorePort () {
-    const port = await findRemembered();
-    if (port) await connect(port);
-    else say('Радио не подключено. Декодер работает и без этого.');
+    if (!await autoConnect('Автоподключение'))
+      if (!civ.port) say('Радио не подключено. Декодер работает и без этого.');
   })();
 
   /* Радио включили или воткнули позже — подхватываем, если оно уже разрешено. */
   navigator.serial.addEventListener('connect', async () => {
     if (civ.port) return;
-    const port = await findRemembered();
-    if (port) { log?.('Радио появилось на шине — подключаюсь.', 'dim'); await connect(port); }
+    log?.('Радио появилось на шине — подключаюсь.', 'dim');
+    await autoConnect('Появление на шине');
   });
 
   navigator.serial.addEventListener('disconnect', () => {
