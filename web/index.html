@@ -45,10 +45,16 @@
   .meter > div { height:100%; width:0; background:linear-gradient(90deg,var(--ok),var(--warn));
                  transition:width .12s linear; }
   button.band { padding:6px 10px; font-weight:500; font-size:13px; }
-  #waterfall { width:100%; height:240px; display:block; background:#000;
-               border:1px solid var(--line); border-radius:7px; cursor:crosshair; }
-  .spanlabels { display:flex; justify-content:space-between; color:var(--dim);
-                font:11px ui-monospace, Consolas, monospace; margin-top:4px; }
+  /* Пропорции сняты с фотографии экрана IC-705: спектр примерно 45 % высоты,
+     под ним полоса шкалы, ниже водопад. */
+  #waterfall { width:100%; height:320px; display:block; background:#05070d;
+               border:1px solid var(--line); border-top:0;
+               border-radius:0 0 7px 7px; cursor:crosshair; }
+  .scopebar { display:flex; justify-content:space-between; align-items:center;
+              background:#1b2436; border:1px solid var(--line); border-bottom:0;
+              border-radius:7px 7px 0 0; padding:5px 10px;
+              font:11px ui-monospace, Consolas, monospace;
+              letter-spacing:.08em; color:#cde1f5; }
   .hint { color:var(--dim); font-size:13px; margin:8px 0 0; }
   code { font-family:ui-monospace, Consolas, monospace; background:#0e1015;
          padding:1px 5px; border-radius:4px; }
@@ -121,11 +127,22 @@
 
   <div class="row" id="bands" style="gap:6px"></div>
 
-  <canvas id="waterfall" width="950" height="240"></canvas>
-  <div class="spanlabels">
-    <span id="spanLo">—</span><span id="spanMid">—</span><span id="spanHi">—</span>
+  <div class="scopebar">
+    <span>SPECTRUM SCOPE</span>
+    <span id="scopeInfo" class="dim">панорама не пришла</span>
   </div>
-  <p class="hint">Клик по панораме перестраивает радио, частота округляется до сетки 12.5&nbsp;кГц.</p>
+  <canvas id="waterfall"></canvas>
+  <div class="row" style="margin-top:10px">
+    <label>Контраст: пол</label>
+    <input type="range" id="wfFloor" min="0" max="150" value="20" style="width:130px">
+    <span id="wfFloorVal" class="dim">20</span>
+    <label>потолок</label>
+    <input type="range" id="wfCeil" min="10" max="160" value="140" style="width:130px">
+    <span id="wfCeilVal" class="dim">140</span>
+  </div>
+  <p class="hint">Клик по панораме перестраивает радио, частота округляется до сетки 12.5&nbsp;кГц.
+  Ползунками подгоняется контраст: пол поднимают, пока шум не станет тёмно-синим, потолок опускают,
+  пока сигналы не заиграют до жёлтого.</p>
 </div>
 
 <div class="panel">

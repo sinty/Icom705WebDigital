@@ -12,9 +12,7 @@
 Флаг --coi добавляет заголовки COOP/COEP (нужны только если когда-нибудь
 понадобится SharedArrayBuffer; сейчас декодер однопоточный и обходится без него).
 """
-import functools
 import http.server
-import socketserver
 import sys
 
 TYPES = {
@@ -56,8 +54,12 @@ def main():
     port = int(args[0]) if args else 8000
     Handler.coi = '--coi' in sys.argv
 
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(('127.0.0.1', port), Handler) as srv:
+    # ОБЯЗАТЕЛЬНО многопоточный: страница тянет модули и wasm параллельно, а на
+    # однопоточном TCPServer одна брошенная посередине connection вешает всё —
+    # порт слушается, но ответов нет. Штатный python -m http.server тоже
+    # использует ThreadingHTTPServer, и не случайно.
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
+    with http.server.ThreadingHTTPServer(('127.0.0.1', port), Handler) as srv:
         print(f'http://localhost:{port}/web/index.html'
               f'{"  (COOP/COEP включены)" if Handler.coi else ""}')
         srv.serve_forever()

@@ -7,7 +7,7 @@
  * работает и без CAT-соединения, а CAT полезен и без декодера.
  */
 import { CivPort, BANDS, sUnits } from './civ/civ.js';
-import { SpectrumAssembler, WaterfallView, POINTS } from './civ/spectrum.js';
+import { SpectrumAssembler, ScopeView, POINTS } from './civ/spectrum.js';
 
 const $ = id => document.getElementById(id);
 
@@ -23,7 +23,7 @@ const fmtHz = hz => (hz / 1e6).toFixed(6).replace(/(\d)(?=(\d{3})+\.)/g, '$1 ') 
 export function initRadio ({ log }) {
   const civ = new CivPort();
   let polling = false;
-  let waterfall = null;
+  let scope = null;
   let assembler = null;
   let lastCenter = null, lastSpan = null;
 
@@ -51,16 +51,19 @@ export function initRadio ({ log }) {
   /* ---------- панорама ---------- */
   function setupWaterfall () {
     const cv = $('waterfall');
-    waterfall = new WaterfallView(cv, { history: 240 });
-    waterfall.clear();
+    scope = new ScopeView(cv, { history: 260 });
+    applyContrast();
+    window.addEventListener('resize', () => scope?.resize());
+
     assembler = new SpectrumAssembler(row => {
-      waterfall.push(row.data);
+      scope.push(row);
       if (row.centerHz !== lastCenter || row.spanHz !== lastSpan) {
         lastCenter = row.centerHz; lastSpan = row.spanHz;
         if (row.centerHz != null && row.spanHz != null) {
-          $('spanLo').textContent = fmtHz(row.centerHz - row.spanHz / 2);
-          $('spanHi').textContent = fmtHz(row.centerHz + row.spanHz / 2);
-          $('spanMid').textContent = fmtHz(row.centerHz);
+          const stepKhz = row.spanHz / 1000 / 10;
+          $('scopeInfo').textContent =
+            `CENTER ${fmtHz(row.centerHz)} · обзор ${(row.spanHz / 1000).toFixed(0)} кГц · ` +
+            `сетка ${stepKhz % 1 ? stepKhz.toFixed(1) : stepKhz}k/10dB`;
         }
       }
     });
@@ -172,6 +175,17 @@ export function initRadio ({ log }) {
     await refreshUsbOut();
     say('USB-вывод: AF — декодер работать не будет, это режим для обычного звука.');
   };
+
+  /* Контраст: сырые значения кадров идут 0..0xA0, а куда попадает шумовая полка,
+     зависит от усиления и REF на радио. Поэтому границы отображения — руками. */
+  function applyContrast () {
+    const lo = +$('wfFloor').value, hi = +$('wfCeil').value;
+    $('wfFloorVal').textContent = lo;
+    $('wfCeilVal').textContent = hi;
+    scope?.setRange(lo, hi);
+  }
+  $('wfFloor').oninput = applyContrast;
+  $('wfCeil').oninput = applyContrast;
 
   $('scopeOn').onchange = async e => {
     await civ.setScopeOutput(e.target.checked);
