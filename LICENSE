@@ -1,0 +1,35 @@
+Copyright (c) 2026 Andrei Shcherbakov
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
+OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+This licence covers only the code in this repository (web/, native/shims/,
+native/CMakeLists.txt, test/, tools/).
+
+The build combines it with third-party sources that are fetched, not vendored:
+
+  * mbelib (lwvmobile fork, branch ambe_tones) — ISC.
+  * libsndfile 1.2.2 — LGPL-2.1-or-later.
+  * dsd-fme (lwvmobile) — mostly ISC, but not entirely:
+      src/fec.c                     GPL-3.0-only
+      src/rs-12-9.c, src/ezpwd/*    GPL-3.0-or-later
+      src/dstar_header.c, fcs.h,
+      descramble.h                  GPL-2.0-only
+
+Because those files are linked into it, the resulting dsd-fme-rb.wasm is a
+combined work under the GNU General Public License, and redistributing that
+binary carries GPL obligations. Note also that GPL-2.0-only and GPL-3.0-only
+files coexist upstream in dsd-fme; that is inherited from upstream, not
+introduced here. Full source for every component is fetched by
+.github/workflows/pages.yml, so the build is reproducible from source.

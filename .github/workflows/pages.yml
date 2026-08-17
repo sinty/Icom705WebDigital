@@ -1,0 +1,122 @@
+# Сборка WASM-декодера и публикация страницы на GitHub Pages.
+#
+# Готовые артефакты в репозитории не хранятся: их собирает этот workflow из
+# исходников, поэтому сборка воспроизводима, а история не тащит бинарники.
+# Версии зависимостей пришпилены коммитами — те же, на которых всё проверено
+# (см. NOTES.md, раздел про сборку в WebAssembly).
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  MBELIB_COMMIT: 30dc79074ca022366a27d705b8023011d9600339
+  DSDFME_COMMIT: c960f9932ce6827f15656bc3b318b234b3dd2f34
+  LIBSNDFILE_TAG: 1.2.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Ninja
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
+      # Версия не пришпилена намеренно: локально всё собрано на latest.
+      # Если однажды сломается — пришпилить здесь конкретную.
+      - name: Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Забрать исходники декодера
+        run: |
+          set -eux
+          mkdir -p native/third_party
+          cd native/third_party
+
+          git clone --no-checkout https://github.com/lwvmobile/mbelib mbelib
+          git -C mbelib fetch --depth 1 origin "$MBELIB_COMMIT"
+          git -C mbelib checkout "$MBELIB_COMMIT"
+
+          git clone --no-checkout https://github.com/lwvmobile/dsd-fme dsd-fme
+          git -C dsd-fme fetch --depth 1 origin "$DSDFME_COMMIT"
+          git -C dsd-fme checkout "$DSDFME_COMMIT"
+
+          git clone --depth 1 -b "$LIBSNDFILE_TAG" \
+            https://github.com/libsndfile/libsndfile libsndfile
+
+      - name: mbelib
+        run: |
+          emcmake cmake -G Ninja -S native/third_party/mbelib \
+            -B native/third_party/mbelib/build-wasm \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+          ninja -C native/third_party/mbelib/build-wasm
+
+      # CMAKE_POLICY_VERSION_MINIMUM нужен, если в системе CMake 4:
+      # совместимость с cmake_minimum_required(VERSION < 3.5) там убрана.
+      - name: libsndfile
+        run: |
+          emcmake cmake -G Ninja -S native/third_party/libsndfile \
+            -B native/third_party/libsndfile/build-wasm \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTING=OFF -DENABLE_EXTERNAL_LIBS=OFF -DENABLE_MPEG=OFF \
+            -DENABLE_CPACK=OFF
+          ninja -C native/third_party/libsndfile/build-wasm
+
+      - name: Декодер в WASM
+        run: |
+          emcmake cmake -G Ninja -S native -B native/build
+          ninja -C native/build dsd-fme-rb
+          ls -la native/build/dsd-fme-rb.mjs native/build/dsd-fme-rb.wasm
+
+      # Проверки, которым не нужны эталонные записи с радио
+      - name: Тесты
+        run: node test/scope_frames.mjs
+
+      - name: Сборка сайта
+        run: |
+          set -eux
+          mkdir -p _site/native/build _site/ref _site/tools
+          cp index.html _site/
+          cp -r web _site/
+          cp tools/scope-preview.html _site/tools/
+          cp native/build/dsd-fme-rb.mjs native/build/dsd-fme-rb.wasm _site/native/build/
+          # нужна самопроверке декодера прямо в браузере, без радио
+          cp ref/demod_stereo.wav _site/ref/
+          # Jekyll иначе выбросит каталоги, начинающиеся с подчёркивания
+          touch _site/.nojekyll
+          du -sh _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
