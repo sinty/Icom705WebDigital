@@ -40,6 +40,16 @@
   #log .bad { color:var(--bad); font-weight:600; }
   #status { color:var(--dim); font-size:13px; }
   .note { background:#2a2410; border-color:#4a3d12; }
+  .meter { width:170px; height:7px; background:#0e1015; border:1px solid var(--line);
+           border-radius:4px; overflow:hidden; margin-top:5px; }
+  .meter > div { height:100%; width:0; background:linear-gradient(90deg,var(--ok),var(--warn));
+                 transition:width .12s linear; }
+  button.band { padding:6px 10px; font-weight:500; font-size:13px; }
+  #waterfall { width:100%; height:240px; display:block; background:#000;
+               border:1px solid var(--line); border-radius:7px; cursor:crosshair; }
+  .spanlabels { display:flex; justify-content:space-between; color:var(--dim);
+                font:11px ui-monospace, Consolas, monospace; margin-top:4px; }
+  .hint { color:var(--dim); font-size:13px; margin:8px 0 0; }
   code { font-family:ui-monospace, Consolas, monospace; background:#0e1015;
          padding:1px 5px; border-radius:4px; }
 </style>
@@ -81,6 +91,41 @@
     <input type="range" id="vol" min="0" max="100" value="80" style="width:130px">
   </div>
   <div class="row"><span id="status">Начните с разрешения доступа к звуку.</span></div>
+</div>
+
+<div class="panel">
+  <h2>Радио — управление по CI-V</h2>
+  <div class="row">
+    <button id="civConnect">Подключить CAT-порт</button>
+    <button id="civDisconnect" class="sec" disabled>Отключить</button>
+    <label><input type="checkbox" id="civAllPorts"> показать все порты</label>
+    <span id="civStatus" class="dim">Радио не подключено. Декодер работает и без этого.</span>
+  </div>
+
+  <div class="stats" style="margin:14px 0">
+    <div><b>Частота</b><span id="freq" class="dim">—</span></div>
+    <div><b>Режим</b><span id="mode" class="dim">—</span></div>
+    <div><b>Вывод USB</b><span id="usbOut" class="dim">—</span></div>
+    <div style="min-width:190px">
+      <b>S-метр</b>
+      <span id="smeterText" class="dim">—</span>
+      <div class="meter"><div id="smeterBar"></div></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="ifMode" class="sec needs-civ" disabled>IF (декодер)</button>
+    <button id="afMode" class="sec needs-civ" disabled>AF (обычный звук)</button>
+    <label><input type="checkbox" id="scopeOn" class="needs-civ" checked disabled> панорама</label>
+  </div>
+
+  <div class="row" id="bands" style="gap:6px"></div>
+
+  <canvas id="waterfall" width="950" height="240"></canvas>
+  <div class="spanlabels">
+    <span id="spanLo">—</span><span id="spanMid">—</span><span id="spanHi">—</span>
+  </div>
+  <p class="hint">Клик по панораме перестраивает радио, частота округляется до сетки 12.5&nbsp;кГц.</p>
 </div>
 
 <div class="panel">

@@ -3,6 +3,8 @@
  * Главный поток тут только раздаёт сообщения и рисует. Вся арифметика в воркере,
  * весь звук — в двух worklet-ах.
  */
+import { initRadio } from './radio.js';
+
 const $ = id => document.getElementById(id);
 
 const CONSTRAINTS = dev => ({
@@ -237,3 +239,6 @@ const sendSquelch = () => {
 };
 $('squelch').oninput = sendSquelch;
 $('squelchOn').onchange = sendSquelch;
+
+// CI-V независим от аудиотракта: декодер работает без CAT, CAT полезен без декодера
+initRadio({ log });

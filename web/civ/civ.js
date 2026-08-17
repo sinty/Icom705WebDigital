@@ -14,7 +14,12 @@
  * и справочника CI-V IC-705.
  */
 
-export const ICOM_VID = 0x0C26;
+/* VID, под которыми встречается CAT-порт IC-705. Icom — свой, Silicon Labs —
+ * потому что внутри стоит мост CP210x и на части систем порт перечисляется им.
+ * В civ.py соседнего проекта VID Icom был приоритетом, а не условием отбора,
+ * и опрашивались все USB-порты — повторяем эту осторожность: фильтр можно снять. */
+export const VENDOR_IDS = [0x0c26, 0x10c4];
+export const ICOM_VID = 0x0c26;
 
 export const MODES = {
   0: 'LSB', 1: 'USB', 2: 'AM', 3: 'CW', 4: 'RTTY',
@@ -76,10 +81,13 @@ export class CivPort {
 
   static get supported () { return 'serial' in navigator; }
 
-  /** Выбор порта пользователем — обязателен жест, поэтому только из обработчика. */
-  async requestPort () {
+  /** Выбор порта пользователем — обязателен жест, поэтому только из обработчика.
+   *  all=true снимает фильтр по VID: если радио перечислилось не как ожидается,
+   *  без этого его просто не будет видно в списке. */
+  async requestPort ({ all = false } = {}) {
     if (!CivPort.supported) throw new Error('Web Serial не поддерживается (нужен Chrome или Edge)');
-    return navigator.serial.requestPort({ filters: [{ usbVendorId: ICOM_VID }] });
+    const filters = VENDOR_IDS.map(usbVendorId => ({ usbVendorId }));
+    return navigator.serial.requestPort(all ? {} : { filters });
   }
 
   async open (port) {
